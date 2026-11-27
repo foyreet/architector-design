@@ -1,6 +1,7 @@
 """Metric hierarchies and additive proposals from the configured model."""
 import json
 
+import task_context
 import tree_methods
 from block_contracts import ContractError
 from codex_chat import standalone_answer
@@ -60,7 +61,8 @@ def request(hub, user, body, action):
             raise ContractError('Выбранная ветвь отсутствует.')
         nodes = nodes[index]['children']
     instructions = tree_methods.instructions(hub, user, 'metrics', DEFAULT_METHOD, RESPONSE_CONTRACT)
-    reply = standalone_answer(hub.root, json.dumps({**context, 'request': prompt, 'path': path}, ensure_ascii=False), instructions).strip()
+    reply = standalone_answer(hub.root, json.dumps({**context, 'request': prompt, 'path': path,
+                                                   'task_context': task_context.saved_materials(hub, user, body, 'metrics')}, ensure_ascii=False), instructions).strip()
     try:
         result = validate(json.loads(reply[7:-3] if reply.startswith('```json') and reply.endswith('```') else reply))
         if not result:

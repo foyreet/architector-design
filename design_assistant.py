@@ -2,6 +2,7 @@
 import json
 
 import metric_trees
+import task_context
 import tree_methods
 
 from block_contracts import ContractError
@@ -136,8 +137,8 @@ def request(hub, user, body, action):
             source, saved, version = state['source'], state['saved'], state['version']
             if body.get('revision') != source['revision'] or body.get('version') != version:
                 raise ContractError('Источники изменились. Откройте выбор дерева заново.', 409)
-        elif not tree:
-            raise ContractError('Выберите дерево проблем или иерархию метрик.')
+        elif not tree and not (task_context.request_text(body) or any(s.strip() for s in sections.values()) or body.get('task_id')):
+            raise ContractError('Опишите задачу или выберите материалы для черновика.')
         options = saved['options'] if saved else []
         answers = source['answers'] if source else []
         try:
@@ -152,6 +153,8 @@ def request(hub, user, body, action):
         context = {'document': document, 'tree': source, 'cases': cases, 'metric_tree': tree,
                    'case_tree_revision': saved['source']['revision'] if cases else None}
         contract = DRAFT_CONTRACT
+    context['task_context'] = task_context.saved_materials(hub, user, body, action)
+    context['request'] = task_context.request_text(body)
     instruction = tree_methods.instructions(hub, user, action, METHODS[action], contract)
     reply = standalone_answer(hub.root, json.dumps(context, ensure_ascii=False), instruction)
     try:

@@ -94,5 +94,8 @@ window.designFlow = (() => {
     settings.href = target;
   }
   refresh();
-  return {url, taskTitle, treeOpened, documentOpened, lastVisit, remember, historyPrefix};
+  function aiScope() {
+    return {task_id:state.doc, task_tree_id:state.tree, task_metric_tree_id:state.metric};
+  }
+  return {url, aiScope, taskTitle, treeOpened, documentOpened, lastVisit, remember, historyPrefix};
 })();

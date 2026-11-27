@@ -2,6 +2,7 @@
 import json
 import time
 
+import task_context
 import tree_methods
 from block_contracts import ContractError
 from design_documents import identity, owned
@@ -60,7 +61,7 @@ def suggest_questions(hub, user, body, context):
             raise ContractError('Выбранный вопрос отсутствует.')
         branch = branch[index]['children']
     prompt = json.dumps({**context, 'problem_tree': tree,
-                         'path': path, 'request': request}, ensure_ascii=False)
+                         'path': path, 'request': request, 'task_context': task_context.saved_materials(hub, user, body, 'problems')}, ensure_ascii=False)
     instructions = tree_methods.instructions(hub, user, 'problems', DEFAULT_METHOD, RESPONSE_CONTRACT)
     reply = standalone_answer(hub.root, prompt, instructions)
     def parse(items, depth):
