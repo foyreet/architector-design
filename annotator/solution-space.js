@@ -1,7 +1,8 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
-  const params = new URLSearchParams(location.search), id = params.get('id');
+  const params = new URLSearchParams(location.search);
+  let id = params.get('id');
   function page(path, treeId) {
     const url = new URL(path, location.origin);
     if (params.has('project')) url.searchParams.set('project', params.get('project'));
@@ -26,7 +27,7 @@
   }
   async function api(action, data = {}, resource = 'solution-spaces') {
     const response = await fetch('/api/' + resource + '/' + action, {method:'POST',
-      headers:{'Content-Type':'application/json','X-Architect-Request':'1'}, body: JSON.stringify({id, ...data})});
+      headers:{'Content-Type':'application/json','X-Architect-Request':'1'}, body: JSON.stringify({...window.designFlow.aiScope(), id, ...data})});
     const result = await response.json();
     if (!response.ok) throw Object.assign(Error(result.error || 'Ошибка запроса'), {status: response.status});
     return result;
@@ -37,7 +38,7 @@
     save:changes => api('save-method', {changes})
   });
   function controls() {
-    $('generate').disabled = busy || !source?.answers.length;
+    $('generate').disabled = busy || !source;
     // Once cases exist, regeneration is a secondary action and saving becomes the primary one.
     $('generate').classList.toggle('primary', !working);
     $('save').hidden = !working;
@@ -98,7 +99,7 @@
         const a = plan.source.answers[i - 1];
         refs.append(element('strong',a.path.join(' → ')), element('p', a.answer));
       }
-      card.append(refs);
+      if (item.evidence.length) card.append(refs);
       if (editable) {
         const find = element('button','Найти аналоги в интернете'), note = element('p','');
         const sources = document.createElement('div'); sources.className = 'sources';
@@ -107,7 +108,7 @@
         find.onclick = async () => {
           busy = true; controls(); note.textContent = 'Ищем внедрения, разборы неудач, статьи и реализации…';
           try {
-            const data = await api('research', {case:item, source_revision:plan.source.revision});
+            const data = await api('research', {case:item, request:plan.request || '', source_revision:plan.source.revision});
             if (data.sources.length) {
               const byUrl = new Map((item.sources || []).map(s => [s.url,s]));
               data.sources.forEach(s => byUrl.set(s.url,s));
@@ -137,10 +138,10 @@
     busy = true; controls(); $('cancel').hidden = false;
     generateNote('Модель разбирает ответы на кейсы…');
     try {
-      const result = await api('generate');
+      const result = await api('generate', {request:$('case-request').value});
       if (token !== generation) return;
       proposal = result; cards($('proposals'), proposal, false); $('preview').hidden = false;
-      generateNote(working ? 'Принятые предложения заменят текущие кейсы. Сохранение отдельной кнопкой.' : 'Проверьте кейсы и их связь с ответами.');
+      generateNote(working ? 'Принятые предложения заменят текущие кейсы. Сохранение отдельной кнопкой.' : 'Проверьте кейсы и их связь с запросом и материалами задачи.');
     } catch (e) { if (token === generation) generateNote(e.message); }
     finally { if (token === generation) { busy = false; $('cancel').hidden = true; controls(); } }
   };
@@ -154,7 +155,14 @@
   $('save').onclick = async () => {
     busy = true; controls();
     try {
-      const result = await api('save', {version, source_revision:working.source.revision, options:working.options});
+      const result = await api('save', {version, source_revision:working.source.revision, options:working.options, request:working.request || ''});
+      if (pendingTree) {
+        pendingTree = false;
+        window.designFlow.treeOpened('tree', id, true);
+        window.designFlow.remember('solutions');
+        history.replaceState(null, '', window.designFlow.url('solutions'));
+        $('library').hidden = true;
+      }
       version = result.version; dirty = false; status('Кейсы сохранены.');
     } catch (e) { status(e.message); }
     finally { busy = false; controls(); }
@@ -164,11 +172,12 @@
     const data = await api('get');
     window.designFlow.remember('solutions');
     $('editor').hidden = false;
-    source = data.source; version = data.version; working = data.saved;
+    pendingTree = data.pending_tree; source = data.source; version = data.version; working = data.saved;
     $('title').textContent = taskTitle || source.title; $('problem').textContent = source.problem;
     for (const a of source.answers) $('answers').append(element('strong', a.path.join(' → ')),element('p', a.answer));
     if (working) { cards($('options'), working, true); $('workspace').hidden = false; }
-    if (!source.answers.length) generateNote('Запишите хотя бы один ответ в дереве, чтобы построить кейсы.');
+    $('case-request').value = working?.request || '';
+    $('context').hidden = !source.answers.length;
     controls();
     if (/^#case-\d+$/.test(location.hash)) {
       if (params.has('version') && String(version) !== params.get('version')) status('Подборка кейсов изменилась. Открыта текущая версия.');
@@ -190,7 +199,7 @@
       url.searchParams.set('new', '1');
       if (attachDoc) url.searchParams.set('attach', '1');
       create.href = url;
-      list.append(element('p', attachDoc || draftTask ? 'Для этой задачи выберите сохранённое дерево проблем или создайте новое.' :
+      list.append(element('p', attachDoc || draftTask ? 'При желании можно связать задачу с существующим деревом.' :
         'Пока нет сохранённых деревьев.'), create);
     }
     for (const tree of trees) {
@@ -218,14 +227,18 @@
     await library();
     status('Это дерево ещё не сохранено. Выберите сохранённое дерево или вернитесь к вопросам.');
   }
-  let taskTitle;
+  let taskTitle, pendingTree;
   async function openStage() {
     taskTitle = await window.designFlow.taskTitle();
     if (taskTitle) {
       $('title').textContent = taskTitle;
       document.title = taskTitle + ' · ' + document.title;
     }
-    if (id) await start().catch(fallback);
+    if (!id && params.has('doc')) {
+      id = crypto.randomUUID();
+      await start();
+      await library();
+    } else if (id) await start().catch(fallback);
     else await library();
   }
   openStage().catch(e => status(e.message));

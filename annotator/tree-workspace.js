@@ -29,7 +29,7 @@
     save:changes => api('save-method', changes.tree)
   });
   const tree = window.problemSpace(changed, (request, path) =>
-    api(metrics ? 'suggest' : 'suggest-questions', {...value(), request, path}), metrics);
+    api(metrics ? 'suggest' : 'suggest-questions', {...window.designFlow.aiScope(), ...value(), request, path}), metrics);
   function value() {
     return {title: $('title').value, [goalKey]: $('formulation').value, [nodesKey]: tree.value()};
   }

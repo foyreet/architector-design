@@ -165,6 +165,12 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
       label.append(select); content.append(label);
       return select;
     }
+    const brief = document.createElement('textarea');
+    if (!bindOnly) {
+      const label = el('label', 'Что нужно отразить в черновике?');
+      brief.rows = 2; label.append(brief); content.append(label);
+      content.append(el('p', 'Модель учтёт текущий текст документа и выбранные материалы задачи.'));
+    }
     const select = picker('Дерево проблем', 'Не использовать', trees);
     const cases = el('fieldset', '');
     cases.hidden = true;
@@ -198,7 +204,7 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
       select.disabled = cases.disabled = metric.disabled = true;
       status('Модель готовит черновик…');
       try {
-        const data = await api('compose', {...initial, tree_id:select.value, revision:loaded?.source.revision,
+        const data = await api('compose', {...initial, request:brief.value, tree_id:select.value, revision:loaded?.source.revision,
           version:loaded?.version, cases:selectedLinks.cases || [],
           metric_tree_id:chosen?.id, metric_revision:chosen?.revision});
         if (token === active) preview(data.proposals, initial, selectedLinks);
@@ -206,7 +212,7 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     });
     function ready() {
       generate.disabled = Boolean((metric.value && !metrics.trees.some(t => t.id === metric.value)) ||
-        (select.value && !loaded) || (!bindOnly && !select.value && !metric.value));
+        (select.value && !loaded));
     }
     metric.onchange = () => {
       const chosen = metrics.trees.find(t => t.id === metric.value);
@@ -217,7 +223,7 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     };
     metric.onchange();
     if (!trees.length) content.append(link('Открыть пространство проблем', '/problem-space.html'));
-    status(trees.length || metrics.trees.length ? '' : 'Сначала сохраните дерево проблем или иерархию метрик.');
+    status('');
     select.onchange = async () => {
       const step = ++sequence;
       loaded = null; ready();
@@ -236,7 +242,7 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
           cases.append(el('p', 'Версия кейсов изменилась. Выберите нужные кейсы заново.'));
         }
         options.forEach((item, i) => {
-          const choice = check(item.title, previousCases.includes(i + 1));
+          const choice = check(item.title, sameTree && !Array.isArray(links.cases) || previousCases.includes(i + 1));
           choice.input.value = i + 1;
           cases.append(choice.label);
         });

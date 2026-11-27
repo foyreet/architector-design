@@ -3,6 +3,9 @@
 <main><div class="solution-title"><h1 id="title">Пространство решений</h1><button id="edit-method" aria-haspopup="dialog">Методика</button></div><section id="library" hidden><h2>Выберите дерево проблем</h2><div id="tree-list"></div></section>
 <div id="editor" hidden><p id="problem"></p>
 <details id="context"><summary>Ответы из дерева</summary><div id="answers"></div></details>
+<label for="case-request">Что нужно разобрать на кейсы?</label>
+<textarea id="case-request" rows="2" placeholder="Опишите задачу или уточните запрос"></textarea>
+<p class="muted">Модель учтёт сохранённые материалы этой задачи.</p>
 <div class="actions generate-row"><button id="generate" class="primary" disabled>Разбить на кейсы с AI</button><button hidden id="cancel">Отменить запрос</button><a id="tree-ai-settings" href="#ai-settings">Настроить модель</a></div><p id="generate-status" role="status"></p>
 <section id="preview" hidden><h2>Предложенные кейсы</h2><div id="proposals" class="cards"></div><div class="actions"><button id="apply" class="primary">Принять кейсы</button><button id="discard">Отмена</button></div></section>
 <section id="workspace" hidden><h2>Кейсы</h2><p id="stale"></p><div id="options" class="cards"></div></section>

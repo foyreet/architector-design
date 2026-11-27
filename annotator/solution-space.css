@@ -55,3 +55,5 @@ article p{white-space:pre-wrap}
   .solution-header .design-flow{order:3;flex:1 1 100%}
   .solution-header #status{max-width:none;flex:1 1 0}
 }
+
+#case-request{display:block;width:100%;box-sizing:border-box;margin-top:.35rem}

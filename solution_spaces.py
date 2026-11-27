@@ -1,6 +1,8 @@
 """Candidate architectures grounded in a revision of a problem tree."""
 import json
+import time
 
+import task_context
 import tree_methods
 from block_contracts import ContractError
 from design_documents import identity
@@ -23,7 +25,7 @@ CASE_CONTRACT = """В evidence укажи id ответов из answers, на �
 бизнес-задачу и ожидаемый результат, query — техническую задачу и решающее ограничение.
 До фактического поиска не выдавай примеры за найденные источники. Не выдумывай метрики или результаты.
 Верни только непустой JSON-массив объектов со строками title, approach, rationale, assumptions,
-tradeoffs, validation, business_query, query и непустым массивом целых чисел evidence. assumptions может быть пустой строкой."""
+tradeoffs, validation, business_query, query и массивом целых чисел evidence. Если подходящих ответов нет, оставь evidence пустым. assumptions может быть пустой строкой."""
 
 RESEARCH_METHOD = """Ищи готовые методы, реализации, научные публикации и опыт внедрения для отдельных
 частей системы, даже если для задачи целиком готового аналога нет. Для поиска используй общие термины,
@@ -108,7 +110,7 @@ def validate(options, context):
             if not isinstance(entry, dict) or not public_url(entry.get('url')) or not all(isinstance(entry.get(k), str) for k in ('title','provider','business','technical','reuse','outcome','quote')):
                 raise ValueError()
         refs = item['evidence']
-        if not isinstance(refs, list) or not refs or any(type(i) is not int or not 1 <= i <= len(context['answers']) for i in refs):
+        if not isinstance(refs, list) or any(type(i) is not int or not 1 <= i <= len(context['answers']) for i in refs):
             raise ValueError()
     return options
 
@@ -129,14 +131,18 @@ def request(hub, user, body, action):
         tree_id = identity(body.get('id'))
         db.execute('BEGIN IMMEDIATE')
         row = db.execute('SELECT * FROM problem_spaces WHERE id=? AND owner=?', (tree_id, user['id'])).fetchone()
-        if not row:
-            raise ContractError('Исходное дерево не найдено.', 404)
-        current = source(row)
+        if row:
+            current = source(row)
+        else:
+            title, links, _ = task_context.task_record(db, user['id'], body)
+            if not body.get('task_id') or not (title or links) or links.get('tree_id') not in (None, tree_id):
+                raise ContractError('Исходное дерево не найдено.', 404)
+            current = {'title': title or 'Задача', 'problem':'', 'answers':[], 'revision':1}
         record = db.execute('SELECT * FROM solution_spaces WHERE tree_id=?', (tree_id,)).fetchone()
         saved = json.loads(record['content']) if record else None
         version = record['version'] if record else 0
         if action == 'get':
-            return {'source': current, 'saved': saved, 'version': version}
+            return {'source': current, 'saved': saved, 'version': version, 'pending_tree':row is None}
         if action == 'save':
             generation = body.get('source_revision')
             if generation == current['revision']:
@@ -149,7 +155,15 @@ def request(hub, user, body, action):
                 options = validate(body.get('options'), context)
             except ValueError:
                 raise ContractError('Проверьте заполнение вариантов и ссылки на ответы.') from None
-            value = {'source': context, 'options': options}
+            if not row:
+                # Materialize the tree only when the user saves their first accepted cases.
+                if db.execute('SELECT 1 FROM problem_spaces WHERE id=?', (tree_id,)).fetchone():
+                    raise ContractError('Исходное дерево недоступно.', 409)
+                from problem_spaces import bind_tree
+                bind_tree(db, user, {'draft_task':body['task_id'], 'companion':links.get('metric_tree_id')}, tree_id, False)
+                db.execute('INSERT INTO problem_spaces(id,owner,title,problem,tree,revision,updated) VALUES(?,?,?,?,?,?,?)',
+                           (tree_id, user['id'], current['title'], '', '[]', 1, time.time()))
+            value = {'source': context, 'options': options, 'request':task_context.request_text(body)}
             if body.get('version') == version - 1 and value == saved:
                 return {'version': version}
             if body.get('version') != version:
@@ -167,16 +181,19 @@ def request(hub, user, body, action):
                 raise ContractError('Заполните поля кейса и поисковый запрос.') from None
         elif action != 'generate':
             raise ContractError('Маршрут решений не найден.', 404)
+    materials = task_context.saved_materials(hub, user, body, 'solutions')
     if action == 'research':
+        context = {**context, 'task_context':materials, 'request':task_context.request_text(body)}
         instructions = tree_methods.instructions(hub, user, 'research', RESEARCH_METHOD, RESEARCH_CONTRACT)
         return research(hub.root, case, context, instructions)
-    if not current['answers']:
-        raise ContractError('Запишите хотя бы один ответ в пространстве проблем.')
+    brief = task_context.request_text(body)
+    if not (brief or current['answers'] or current['problem'].strip() or materials):
+        raise ContractError('Опишите задачу для разбиения на кейсы.')
     methods = tree_methods.method_group(hub, user, METHODS)
     guidance = ('При разбиении на кейсы используй методику:\n' + methods['cases']['text']
                 + '\n\nПри составлении двух поисковых запросов для каждого кейса учитывай методику поиска аналогов. '
                   'На этом шаге требуется только сформулировать запросы:\n' + methods['research']['text'])
-    reply = standalone_answer(hub.root, json.dumps(current, ensure_ascii=False),
+    reply = standalone_answer(hub.root, json.dumps({**current, 'request':brief, 'task_context':materials}, ensure_ascii=False),
                               tree_methods.with_contract(guidance, CASE_CONTRACT)).strip()
     if reply.startswith('```json') and reply.endswith('```'):
         reply = reply[7:-3]
@@ -186,4 +203,4 @@ def request(hub, user, body, action):
             option.pop('sources', None)
     except (ValueError, RecursionError):
         raise ContractError('Модель вернула неполные варианты или сослалась на отсутствующий ответ. Повторите запрос.', 502) from None
-    return {'source': current, 'options': options}
+    return {'source': current, 'options': options, 'request':brief}
