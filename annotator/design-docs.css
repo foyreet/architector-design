@@ -66,6 +66,7 @@
 .visual-editor .toastui-editor-defaultUI-toolbar {height:auto; flex-wrap:wrap; border-radius:8px 8px 0 0}
 .visual-editor .toastui-editor-ww-container {max-height:70vh; overflow:auto}
 .visual-editor .toastui-editor-contents {font:16px/1.7 system-ui; padding:20px}
+.visual-editor .toastui-editor-contents > p {max-width:80ch}
 .visual-editor .toastui-editor-contents table {display:block; max-width:100%; overflow:auto}
 .visual-editor .toastui-editor-popup {max-width:calc(100vw - 64px)}
 .visual-editor .toastui-editor-contents pre {overflow:auto}
@@ -123,7 +124,7 @@
 #task-filter-empty{margin:24px 0 0;overflow-wrap:anywhere}
 
 /* Editor: outline column and a readable text column. */
-main#editor{max-width:1120px;display:grid;grid-template-columns:200px minmax(0,1fr);column-gap:40px}
+main#editor{max-width:1440px;display:grid;grid-template-columns:240px minmax(0,1fr);column-gap:32px}
 main#editor>*{grid-column:2}
 main#editor>.editor-toolbar{grid-column:1/-1}
 main#editor>#doc-outline{grid-column:1;grid-row:2/span 40;align-self:start;position:sticky;top:92px;font-size:14px}
