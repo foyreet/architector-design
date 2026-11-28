@@ -313,10 +313,20 @@ def main():
                         assert len(set(positions)) == 1, positions
                     else:
                         assert positions[0] == positions[1] < positions[2] == positions[3], positions
-                    expect(saved.locator('.task-step').nth(0)).to_contain_text('1 из 2 ответов')
+                    expect(steps.nth(0)).to_contain_text('1/2')
                     expect(saved.locator('.task-step').nth(1)).to_contain_text('1 кейс')
                     expect(saved.locator('.task-step').nth(2)).to_contain_text('0 показателей')
-                    expect(saved.locator('.task-step').nth(3)).to_contain_text('2 из 6 разделов')
+                    expect(steps.nth(3)).to_contain_text('2/6')
+                    expect(steps.nth(0)).to_have_accessible_name('Проблемы 1 из 2 ответов')
+                    expect(steps.nth(3).locator('.task-track > span')).to_have_count(6)
+                    expect(steps.nth(3).locator('.filled')).to_have_count(2)
+                    if width <= 760:
+                        for label in saved.locator('.task-stage-label').all():
+                            expect(label).to_be_visible()
+                    else:
+                        search = page.locator('#task-filter').bounding_box()
+                        create = page.locator('#create').bounding_box()
+                        assert abs(search['y'] - create['y']) < 2
                     expect(page.locator('#design-flow')).to_be_hidden()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     saved.locator('.task-step').nth(1).click()
@@ -497,19 +507,26 @@ def main():
                         api('problem-spaces/save', {'id':twin, 'title':'Новое дерево', 'revision':0, 'problem_tree':[]})
                     page.reload()
                     cards = [page.locator('.task-row').filter(has=page.locator(f'.task-step[href*="{twin}"]')) for twin in twins]
+                    toggle = cards[0].locator('summary')
+                    toggle.click()
                     rename = cards[0].get_by_role('button', name='Переименовать задачу «Новое дерево»')
                     rename.click()
                     expect(page.locator('#task-name')).to_have_value('Новое дерево')
                     page.locator('#task-name').fill('Отмена')
                     page.keyboard.press('Escape')
-                    expect(rename).to_be_focused()
+                    expect(toggle).to_be_focused()
+                    toggle.press('Enter')
                     rename.click()
                     page.locator('#task-name').fill('Переименованная задача')
                     page.locator('#task-name').press('Enter')
-                    expect(cards[0].get_by_role('button', name='Переименовать задачу «Переименованная задача»')).to_be_focused()
+                    expect(toggle).to_be_focused()
                     page.reload()
                     expect(cards[0].locator('.document-row')).to_have_text('Переименованная задача')
                     expect(cards[1].locator('.document-row')).to_have_text('Новое дерево')
+                    toggle.click()
+                    toggle.press('Escape')
+                    expect(toggle).to_be_focused()
+                    toggle.click()
                     remove = cards[0].get_by_role('button', name='Удалить задачу «Переименованная задача»')
                     remove.click()
                     expect(page.locator('#message')).to_have_text('Задача удалена.')
