@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 from unittest.mock import patch
+import uuid
 
 from playwright.sync_api import sync_playwright, expect
 
@@ -203,6 +204,40 @@ def main():
             page.locator('#back-list').click()
             page.screenshot(path=str(artifacts / f'list-{width}.png'))
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+            # Search narrows the list by title, matches «ё» with «е» and stays applied after a rename or a deletion.
+            api('create-task', {'id': str(uuid.uuid4()), 'title': 'Отчёт о продлениях'})
+            page.reload()
+            search = page.get_by_role('searchbox', name='Поиск по названию задачи')
+            shown = page.locator('#documents .task-row:visible .document-row')
+            expect(shown).to_have_count(2)
+            search.fill('отчет')
+            expect(shown).to_have_text(['Отчёт о продлениях'])
+            search.fill('нет такой')
+            expect(shown).to_have_count(0)
+            expect(page.locator('#task-filter-empty')).to_have_text('По запросу «нет такой» задач нет.')
+            if width == 390:
+                long_query = 'a' * 64
+                search.fill(long_query)
+                empty = page.locator('#task-filter-empty')
+                expect(empty).to_be_visible()
+                expect(empty).to_have_text(f'По запросу «{long_query}» задач нет.')
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Длинный запрос расширяет страницу'
+            search.fill('ОТЧЁТ')
+            page.get_by_role('button', name='Переименовать задачу «Отчёт о продлениях»', exact=True).click()
+            page.locator('#task-name').fill('Сводка о продлениях')
+            page.locator('#submit-task').click()
+            expect(page.locator('#task-filter-empty')).to_have_text('По запросу «ОТЧЁТ» задач нет.')
+            expect(search).to_be_focused()
+            search.fill('сводка')
+            page.get_by_role('button', name='Удалить задачу «Сводка о продлениях»', exact=True).click()
+            expect(page.locator('#message')).to_have_text('Задача удалена.')
+            expect(page.locator('#task-filter-empty')).to_have_text('По запросу «сводка» задач нет.')
+            expect(page.locator('#create')).to_be_focused()
+            search.fill('')
+            expect(shown).to_have_text([title])
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
             remove = page.get_by_role('button', name='Удалить документ «' + title + '»', exact=True)
             page.route('**/api/design-documents/delete', lambda route: route.fulfill(status=503, json={'error': 'Удаление недоступно'}))
             remove.click()
@@ -216,6 +251,7 @@ def main():
             expect(page.locator('#create')).to_be_focused()
             page.reload()
             expect(page.locator('#documents')).to_contain_text('пока нет')
+            expect(page.locator('#task-filter')).to_be_hidden()
             assert documents() == [] and not errors, errors
             context.close()
         browser.close()
