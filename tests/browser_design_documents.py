@@ -216,6 +216,13 @@ def main():
             search.fill('нет такой')
             expect(shown).to_have_count(0)
             expect(page.locator('#task-filter-empty')).to_have_text('По запросу «нет такой» задач нет.')
+            if width == 390:
+                long_query = 'a' * 64
+                search.fill(long_query)
+                empty = page.locator('#task-filter-empty')
+                expect(empty).to_be_visible()
+                expect(empty).to_have_text(f'По запросу «{long_query}» задач нет.')
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Длинный запрос расширяет страницу'
             search.fill('ОТЧЁТ')
             page.get_by_role('button', name='Переименовать задачу «Отчёт о продлениях»', exact=True).click()
             page.locator('#task-name').fill('Сводка о продлениях')
