@@ -10,7 +10,6 @@ from block_contracts import ContractError
 SECTIONS = ('problem', 'target', 'metric_validation', 'dataset', 'validation', 'model_training')
 LABELS = ('Проблема и текущий процесс', 'Цели, таргет и антицели', 'Метрики', 'Датасет', 'Валидация', 'Решение, альтернативы и обучение')
 KIND = 'design_document'
-FORMAT = 'architect.design-document'
 
 
 def identity(value):
@@ -106,10 +105,6 @@ def owned(db, user, doc_id):
 def public(row):
     return {'id': row['id'], 'title': row['title'], 'sections': normalize_sections(json.loads(row['sections'])),
             'task_links': json.loads(row['task_links']), 'sources': json.loads(row['sources']), 'revision': row['revision'], 'updated': row['updated'], 'source_release': row['source_release']}
-
-
-def snapshot(row):
-    return {'format': FORMAT, 'version': 1, 'task_links': json.loads(row['task_links']), 'title': row['title'], 'sections': normalize_sections(json.loads(row['sections'])), 'sources': json.loads(row['sources'])}
 
 
 def tree_nodes(encoded):
@@ -407,16 +402,10 @@ def request(hub, user, body, action):
                 return document_overview(db, user['id'])
             rows = db.execute('SELECT id,title,updated,revision FROM design_documents WHERE owner=? ORDER BY updated DESC', (user['id'],))
             return {'documents': [dict(row) for row in rows]}
-    if action in ('create', 'import', 'duplicate'):
+    if action in ('create', 'duplicate'):
         doc_id = identity(body.get('id'))
         source = None
-        if action == 'import':
-            package = body.get('package', {})
-            if not isinstance(package, dict) or package.get('format') != FORMAT or package.get('version') != 1:
-                raise ContractError('Выберите файл дизайн-документа Архитектора.')
-            name, sections = payload(package)
-        else:
-            name, sections = payload(body if 'title' in body or 'sections' in body else
+        name, sections = payload(body if 'title' in body or 'sections' in body else
                                      {'title': 'Новый дизайн-документ', 'sections': {k: '' for k in SECTIONS}})
         with hub.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -433,21 +422,19 @@ def request(hub, user, body, action):
                 elif initial_title is not None and initial_title != draft['title'] and name != draft['title']:
                     raise ContractError('Название задачи уже изменилось в другой вкладке. Обновите страницу.', 409)
             from problem_spaces import problem_tree
-            tree = problem_tree((package if action == 'import' else body).get('problem_tree', []))
+            tree = problem_tree(body.get('problem_tree', []))
             db.execute('INSERT INTO design_documents(id,owner,title,sections,revision,updated,source_release,problem_tree) VALUES(?,?,?,?,?,?,?,?)',
                        (doc_id, user['id'], name, json.dumps(sections, ensure_ascii=False), 1, time.time(), source, json.dumps(tree, ensure_ascii=False)))
-            refs = sources((package if action == 'import' else body).get('sources', {}))
-            if action in ('duplicate', 'import'):
+            refs = sources(body.get('sources', {}))
+            if action == 'duplicate':
                 refs = deepcopy(refs)
-            links = task_links((package if action == 'import' else body).get('task_links', {}))
+            links = task_links(body.get('task_links', {}))
             if action == 'duplicate':
                 original = owned(db, user, body.get('original_id'))
                 saved_links = json.loads(original['task_links'])
                 if links.get('tree_id') == saved_links.get('tree_id') and 'cases' in links:
                     saved_links.update(cases=links['cases'], case_version=links['case_version'])
                 links = copy_stages(db, user['id'], saved_links, refs)
-            elif action == 'import':
-                links = copy_stages(db, user['id'], links, refs)
             elif draft:
                 for key in ('tree_id', 'metric_tree_id'):
                     if links.get(key) and links[key] != draft[key]:
@@ -495,5 +482,4 @@ def request(hub, user, body, action):
                 db.execute('UPDATE design_documents SET title=?,sections=?,sources=?,task_links=?,revision=revision+1,updated=? WHERE id=?',
                            (name, json.dumps(sections, ensure_ascii=False), json.dumps(refs, ensure_ascii=False), json.dumps(links), time.time(), row['id']))
             return {'document': public(owned(db, user, row['id']))}
-        if action == 'export': return {'package': snapshot(row)}
         raise ContractError('Маршрут документа не найден.', 404)

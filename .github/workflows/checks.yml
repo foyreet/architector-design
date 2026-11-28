@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m unittest discover -s tests
-      - run: pip install playwright
+      - run: pip install playwright pypdf
       - run: python -m playwright install --with-deps chromium
       - run: python tests/browser_design_flow.py
       - run: python tests/browser_design_documents.py

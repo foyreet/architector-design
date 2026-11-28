@@ -29,7 +29,7 @@ class Documents(unittest.TestCase):
     def test_private_owner_auth_and_incomplete_drafts(self):
         with self.assertRaises(ContractError) as e:docs.request(self.hub,None,{},'list')
         self.assertEqual(e.exception.status,401)
-        for action in ('get','save','export','delete'):
+        for action in ('get','save','delete'):
             with self.subTest(action=action),self.assertRaises(ContractError) as e:self.call(action,self.doc,self.b)
             self.assertEqual(e.exception.status,404)
         self.assertEqual(self.call('list',user=self.b)['documents'],[])
@@ -178,9 +178,6 @@ class Documents(unittest.TestCase):
         self.assertEqual(upgraded['sections'], {**old, 'dataset': '', 'validation': ''})
         self.assertEqual(upgraded['revision'], self.doc['revision'])
         self.assertEqual(self.call('save', upgraded)['document']['revision'], upgraded['revision'])
-        package = self.call('export', upgraded)['package']
-        imported = self.call('import', {'id': str(uuid.uuid4()), 'package': {**package, 'sections': old}})['document']
-        self.assertEqual(imported['sections'], upgraded['sections'])
         ref = {'tree_id': str(uuid.uuid4()), 'revision': 1, 'version': 0,
                'title': 'Источник', 'answers': [], 'cases': []}
         doc = self.call('save', {**upgraded, 'sections': {**old, 'dataset': 'Наблюдения', 'validation': 'По клиентам'},
@@ -191,9 +188,6 @@ class Documents(unittest.TestCase):
         self.assertEqual(updated['sources']['dataset'], ref)
         self.assertEqual(updated['sections']['validation'], 'По клиентам')
         self.assertEqual(updated['sources']['validation'], ref)
-        package = self.call('export', updated)['package']
-        imported = self.call('import', {'id': str(uuid.uuid4()), 'package': package})['document']
-        self.assertEqual(imported['sections'], updated['sections'])
 
     def test_old_features_are_kept_in_dataset(self):
         sections = {key: '' for key in docs.SECTIONS}
@@ -213,10 +207,6 @@ class Documents(unittest.TestCase):
         self.assertEqual(saved['task_links'], links)
         with self.assertRaises(ContractError):
             self.call('save', {**original, 'task_links':{}})
-        package = self.call('export', saved)['package']
-        imported = self.call('import', {'id':str(uuid.uuid4()), 'package':package})['document']
-        # The exported links point to missing materials on this computer.
-        self.assertEqual(imported['task_links'], {})
         with self.assertRaises(ContractError):
             self.call('save', {**saved, 'task_links':{'cases':[1], 'case_version':2}})
         cleared = self.call('save', {**saved, 'task_links':{}})['document']
@@ -262,7 +252,7 @@ class Documents(unittest.TestCase):
         self.assertEqual(self.call('get',self.doc)['document'],self.doc)
         self.assertEqual(self.call('delete',self.doc),{'deleted':self.doc['id']})
         self.assertEqual(self.call('list')['documents'],[])
-        for action in ('get','save','export','delete'):
+        for action in ('get','save','delete'):
             with self.subTest(action=action),self.assertRaises(ContractError) as e:self.call(action,self.doc)
             self.assertEqual(e.exception.status,404)
 
