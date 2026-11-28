@@ -161,11 +161,6 @@ def stored_tree(hub, user, body, action, *, metrics):
     table = 'metric_trees' if metrics else 'problem_spaces'
     nodes_key = 'metrics' if metrics else 'problem_tree'
     goal_key = 'goal' if metrics else 'problem'
-    if action == 'validate-import':
-        if metrics:
-            from metric_trees import content as metric_content
-            return metric_content(body)
-        return content(body)
     with hub.db() as db:
         owner = user['id']
         if action == 'list':

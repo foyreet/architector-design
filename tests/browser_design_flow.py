@@ -1,7 +1,6 @@
 """Steps between problem, solution, metric trees and the design document with isolated data."""
 from pathlib import Path
 import os
-import json
 import re
 import socket
 import subprocess
@@ -29,19 +28,9 @@ def check_task_navigation(page, origin, api, doc, foreign, ids):
         page.goto(f'{origin}/{path}.html?doc={doc}')
         expect(page.locator('#formulation')).to_have_value('Прогноз' if name == 'tree_id' else 'Рост')
         assert parse_qs(urlsplit(page.url).query)['id'] == [ids[name]]
-    page.goto(f'{origin}/problem-space.html?doc={doc}')
-    page.locator('#tree-origin').click()
-    with page.expect_file_chooser() as choice:
-        page.get_by_role('button', name='Заменить содержимое из JSON').click()
-    choice.value.set_files({'name':'tree.json', 'mimeType':'application/json',
-                            'buffer':json.dumps({'format':'architect.problem-space', 'version':1,
-                                                 'problem':'Импорт', 'problem_tree':[]}).encode()})
-    expect(page.locator('#formulation')).to_have_value('Импорт')
-    assert api('problem-spaces/get', {'id':ids['tree_id']})['problem'] == 'Прогноз'
-    page.locator('#save').click()
-    expect(page.locator('#status')).to_have_text('Сохранено')
-    page.reload()
-    expect(page.locator('#formulation')).to_have_value('Импорт')
+        page.locator('#tree-origin').click()
+        expect(page.locator('#root-editor').get_by_role('button')).to_have_text(['Готово'])
+        page.get_by_role('button', name='Готово', exact=True).click()
     record = api('design-documents/get', {'id':doc})['document']
     assert record['task_links']['tree_id'] == ids['tree_id']
     ref = {'tree_id':ids['tree_id'], 'title':'Источник', 'revision':1, 'version':0, 'answers':[], 'cases':[]}
@@ -56,7 +45,7 @@ def check_task_navigation(page, origin, api, doc, foreign, ids):
     with page.expect_popup() as source:
         sections.last.locator('a').click()
     tab = source.value
-    expect(tab.locator('#formulation')).to_have_value('Импорт')
+    expect(tab.locator('#formulation')).to_have_value('Прогноз')
     tab.locator('#design-flow [data-step=document]').click()
     expect(tab.locator('#section-problem')).to_have_value(record['sections']['problem'])
     assert parse_qs(urlsplit(tab.url).query)['id'] == [doc]

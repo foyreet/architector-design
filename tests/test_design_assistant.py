@@ -66,7 +66,7 @@ class DesignAssistantTests(unittest.TestCase):
         self.assertEqual(preview['source']['answers'][0]['path'], ['Когда?'])
         doc = docs.request(self.hub, LOCAL_USER, {**self.body, 'id': str(uuid.uuid4()),
             'sources': {'problem': preview['source']}}, 'create')['document']
-        self.assertEqual(docs.request(self.hub, LOCAL_USER, doc, 'export')['package']['sources'], doc['sources'])
+        self.assertEqual(docs.request(self.hub, LOCAL_USER, doc, 'get')['document']['sources'], doc['sources'])
         with self.assertRaises(ContractError):
             docs.request(self.hub, LOCAL_USER, {**self.body, 'cases': []}, 'compose')
         model.assert_called()
@@ -101,7 +101,7 @@ class DesignAssistantTests(unittest.TestCase):
             sources = {'metric_validation': ref}
             doc = docs.request(self.hub, LOCAL_USER, {**self.body, 'id': str(uuid.uuid4()),
                                'sources': sources}, 'create')['document']
-            self.assertEqual(docs.request(self.hub, LOCAL_USER, doc, 'export')['package']['sources'], sources)
+            self.assertEqual(docs.request(self.hub, LOCAL_USER, doc, 'get')['document']['sources'], sources)
         model.return_value = '[]'
         doc['sections']['metric_validation'] = entry['text']
         docs.request(self.hub, LOCAL_USER, doc, 'review')

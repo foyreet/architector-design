@@ -94,7 +94,7 @@
     if (saving || !id) return;
     saving = true;
     if ($('solutions')) $('solutions').disabled = true;
-    $('save').disabled = $('import').disabled = true;
+    $('save').disabled = true;
     const previousKey = key();
     const dest = conflict ? crypto.randomUUID() : id;
     const current = value();
@@ -119,7 +119,7 @@
     } catch (error) {
       if (error.status === 409) { conflict = true; $('save').textContent = 'Сохранить копию'; }
       status(error.message);
-    } finally { saving = false; if ($('solutions')) $('solutions').disabled = false; $('save').disabled = $('import').disabled = false; }
+    } finally { saving = false; if ($('solutions')) $('solutions').disabled = false; $('save').disabled = false; }
   }
   function openTreeAfterSave(dest, version) {
     id = dest; revision = version; dirty = conflict = false;
@@ -148,35 +148,6 @@
     location.assign(target);
   });
   $('title').oninput = $('formulation').oninput = () => { tree.updateOrigin(); changed(); };
-  $('export').onclick = () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({format:space,version:1,...value()},null,2)],{type:'application/json'}));
-    a.download = ($('title').value || 'Дерево') + '.json';
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  $('import').onclick = () => {
-    const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
-    input.onchange = async () => {
-      $('root-editor').close();
-      try {
-        const data = JSON.parse(await input.files[0].text());
-        if (data.version !== 1 || !(metrics ? [space] : [space,'architect.design-document']).includes(data.format)) throw Error('Выберите JSON дерева.');
-        const record = {...fresh(), title: data.title, [goalKey]: data[goalKey] ?? data.sections?.problem ?? '', [nodesKey]: data[nodesKey]};
-        if (url.searchParams.has('doc')) {
-          const imported = await api('validate-import', {...record, title:$('title').value});
-          $('formulation').value = imported[goalKey];
-          tree.load(imported[nodesKey]);
-          tree.updateOrigin();
-          changed();
-          status('Содержимое заменено. Нажмите «Сохранить», чтобы применить изменения.');
-          return;
-        }
-        const result = await api('save', record);
-        openTree({...record, revision: result.revision});
-      } catch (error) { status(error.message); }
-    };
-    input.click();
-  };
   document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => button.closest('dialog').close(); });
   window.addEventListener('beforeunload', event => { if (dirty || saving) event.preventDefault(); });
   document.addEventListener('keydown', event => {
@@ -203,7 +174,6 @@
       url.searchParams.delete('draft');
       if (task.draft) url.searchParams.set('draft', '1');
       else if (!task.links[key]) url.searchParams.set('attach', '1');
-      $('import').textContent = 'Заменить содержимое из JSON';
       await restore(treeId);
     } else {
       const initial = url.searchParams.get('id') || (oldNew ? oldNew === '1' ? null : oldNew : localStorage.getItem(last));

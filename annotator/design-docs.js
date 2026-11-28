@@ -33,7 +33,7 @@
   }
   function value(){return {task_links:assistant.taskLinks(),sources:assistant.sources(),title:$('title').value,sections:Object.fromEntries(fields.map(([k])=>[k,$('section-'+k).value]))};}
   function same(a,b){return JSON.stringify(a.task_links||{})===JSON.stringify(b.task_links||{})&&JSON.stringify(a.sources||{})===JSON.stringify(b.sources||{})&&a.title===b.title&&fields.every(([k])=>a.sections[k]===b.sections[k]);}
-  function controls(){ $('compose-doc').disabled=!!saving||conflicted||blocked;$('save').disabled=(!dirty&&!!doc?.revision)||!!saving||conflicted||blocked;$('publish').disabled=!!saving||conflicted||blocked;$('conflict').hidden=!conflicted;$('save-status').textContent=doc?(saving?'Сохранение…':dirty?'Есть несохранённые изменения':doc.revision?'Все изменения сохранены':'Новый документ · ещё не сохранён'):''; }
+  function controls(){ $('compose-doc').disabled=!!saving||conflicted||blocked;$('save').disabled=(!dirty&&!!doc?.revision)||!!saving||conflicted||blocked;$('conflict').hidden=!conflicted;$('save-status').textContent=doc?(saving?'Сохранение…':dirty?'Есть несохранённые изменения':doc.revision?'Все изменения сохранены':'Новый документ · ещё не сохранён'):''; }
   function cache(){if(!doc||release)return;try{if(dirty)localStorage.setItem(draftKey(),JSON.stringify({...value(),revision:doc.revision,initial_task_title:doc.title}));else localStorage.removeItem(draftKey());}catch{error('Браузер не сохранил резервную копию. Сохраните документ на сервер перед закрытием.');}}
   function changed() {
     for (const key of ['dataset', 'metric_validation', 'validation']) {
@@ -310,7 +310,7 @@
     window.document.title = content.title + ' · Дизайн-документ';
     $('design-flow').hidden=false;
     $('auth').hidden=true;$('list').hidden=true;$('editor').hidden=false;$('title-label').hidden=false;$('title').hidden=false;$('title').value=content.title;$('read-title').hidden=true;
-    $('save').hidden=false;$('publish').hidden=false;$('copy').hidden=true;$('publication-info').hidden=!doc.source_release;
+    $('save').hidden=false;$('download-pdf').hidden=false;$('copy').hidden=true;$('publication-info').hidden=!doc.source_release;
     $('publication-info').textContent=doc.source_release?'Личная копия публикации. Ваши изменения не затрагивают оригинал.':'';
     renderSections($('sections'),content.sections,true);$('doc-assist').hidden=false;syncSteps(content.task_links || {});assistant.load(content.sources,content.task_links);updateURL(doc.revision?{id:doc.id}:{new:doc.id});$('back-list').textContent='← К задачам';controls();window.scrollTo(0,0);
   }
@@ -478,7 +478,7 @@
     window.document.title = 'Дизайн-документ · Архитектор';
     $('design-flow').hidden=false;
     $('auth').hidden=true;$('list').hidden=true;$('editor').hidden=false;$('title-label').hidden=true;$('title').hidden=true;$('read-title').hidden=false;$('read-title').textContent=result.name;
-    $('save').hidden=true;$('publish').hidden=true;$('copy').hidden=false;$('publication-info').hidden=false;$('publication-info').textContent=`@${result.username} · версия ${result.number} · Опубликованный документ`;
+    $('save').hidden=true;$('download-pdf').hidden=true;$('copy').hidden=false;$('publication-info').hidden=false;$('publication-info').textContent=`@${result.username} · версия ${result.number} · Опубликованный документ`;
     $('doc-assist').hidden=true;renderSections($('sections'),result.package.sections,false);updateURL({release:id});$('back-list').textContent='← Каталог сообщества';controls();window.scrollTo(0,0);
   }
   $('title').addEventListener('input',changed);
@@ -537,8 +537,26 @@
   $('copy').onclick=()=>task(async()=>{const attempt=retryId('copy.'+release.id),r=await api('copy',{id:attempt.id,release_id:release.id});attempt.clear();openEditor(r.document);message('Документ сохранён в списке задач.');});
   $('save-separate').onclick=()=>task(async()=>{const attempt=retryId('separate.'+doc.id),oldKey=draftKey();const r=await api('duplicate',{id:attempt.id,original_id:doc.id,...value()});try{localStorage.removeItem(oldKey);}catch{}attempt.clear();openEditor(r.document,false);message('Ваш вариант сохранён отдельным документом.');});
   $('reload-saved').onclick=()=>task(async()=>{if(!confirm('Загрузить сохранённую версию? Несохранённый текст в этой вкладке будет заменён.'))return;const r=await api('get',{id:doc.id});try{localStorage.removeItem(draftKey());}catch{}openEditor(r.document,false);});
-  $('publish').textContent='Экспорт JSON';
-  $('publish').onclick=()=>task(async()=>{const content=value();if(!content.title.trim()){error('Введите название документа.');$('title').focus();return;}const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([JSON.stringify({format:'architect.design-document',version:1,...content},null,2)],{type:'application/json'}));link.download=content.title+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);});
+  $('download-pdf').onclick = async () => {
+    const button = $('download-pdf');
+    const data = value();
+    const sections = fields.map(([key, heading]) => ({
+      heading, markdown:data.sections[key],
+      evidence:document.querySelector('#doc-section-' + key + ' .section-sources')?.cloneNode(true)
+    }));
+    const currentId = doc.id;
+    button.disabled = true;
+    button.textContent = 'Подготовка PDF…';
+    try {
+      const {downloadDocument} = await import('/document-pdf.js');
+      await downloadDocument(data.title.trim() || 'Дизайн-документ', sections);
+    } catch {
+      if (doc?.id === currentId) error('Не удалось скачать PDF. Повторите попытку.');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Скачать PDF';
+    }
+  };
   const closePreview=()=>{if(!$('publish-confirm').disabled)$('publish-dialog').close();};$('preview-close').onclick=closePreview;$('publish-cancel').onclick=closePreview;
   $('publish-dialog').addEventListener('cancel',e=>{if($('publish-confirm').disabled)e.preventDefault();});
   $('publish-confirm').onclick=async()=>{const button=$('publish-confirm');if(button.disabled)return;button.disabled=true;error('','publish-error');try{const r=await api('publish',{id:doc.id,revision:preview.revision,digest:preview.digest});$('publish-dialog').close();await openRelease(r.release_id);message('Документ опубликован в каталоге сообщества.');}catch(e){error(e.message,$('publish-dialog').open?'publish-error':'editor-error');}finally{button.disabled=false;}};

@@ -1,6 +1,6 @@
 """Explicit document saves and deletion with isolated data on desktop and mobile."""
 from pathlib import Path
-import json
+from pypdf import PdfReader
 import os
 import sys
 import tempfile
@@ -136,10 +136,19 @@ def main():
             page.locator('#back-list').click()
             expect(page.locator('#editor')).to_be_visible()
             assert documents() == [] and not writes
+            expect(page.get_by_role('button', name='Экспорт JSON')).to_have_count(0)
             with page.expect_download() as download:
-                page.locator('#publish').click()
-            exported = json.loads(Path(download.value.path()).read_text())
-            assert exported['sections']['problem'] == 'Текст только в черновике'
+                page.get_by_role('button', name='Скачать PDF').click()
+            assert download.value.suggested_filename == 'Несохранённый документ.pdf'
+            output = artifacts / f'document-{width}.pdf'
+            download.value.save_as(output)
+            reader = PdfReader(output)
+            text = ' '.join(' '.join(p.extract_text() for p in reader.pages).split())
+            links = [annotation.get_object().get('/A', {}).get('/URI')
+                     for sheet in reader.pages for annotation in sheet.get('/Annots', [])]
+            assert any(link and link.rstrip('/') == 'https://example.org' for link in links)
+            assert reader.metadata.title == 'Несохранённый документ'
+            assert 'Текст только в черновике' in text and 'Значение в таблице' in text, text
             assert documents() == [] and not writes
             # A browser reload restores a reserve copy without creating a saved document.
             dialog(True)
