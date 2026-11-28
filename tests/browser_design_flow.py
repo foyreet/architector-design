@@ -279,10 +279,10 @@ def main():
                     page.reload()
                     page.locator('#compose-doc').click()
                     dialog = page.locator('#design-assist-dialog')
-                    expect(dialog).to_contain_text('Дерево проблем: Спрос')
-                    expect(dialog).to_contain_text('Иерархия метрик: Доход')
                     expect(dialog.locator('select')).to_have_count(0)
                     expect(dialog.get_by_role('checkbox', name='Прогноз спроса')).to_be_checked()
+                    expect(dialog).not_to_contain_text('Дерево проблем:')
+                    expect(dialog).not_to_contain_text('Иерархия метрик:')
                     requests = []
                     def fake_proposal(route):
                         requests.append(route.request.post_data_json)
