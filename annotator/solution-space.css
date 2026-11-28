@@ -24,6 +24,8 @@ article p{white-space:pre-wrap}
 #preview,#workspace{margin:20px 0}
 #preview article strong{margin-top:12px;font-size:13px;color:#536680}
 #preview article strong+p{margin-top:2px}
+#proposals h3 label{display:flex;align-items:flex-start;gap:10px;min-height:32px;cursor:pointer;font-weight:inherit}
+#proposals input[type=checkbox]{flex:none;width:18px;height:18px;margin:4px 0 0;padding:0;accent-color:#285bef}
 #stale{color:#865410}
 #stale:empty{display:none}
 

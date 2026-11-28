@@ -38,6 +38,19 @@ class SolutionSpaces(unittest.TestCase):
         self.assertEqual(state['source']['answers'][0]['answer'], 'Вечером')
         self.assertEqual(state['saved']['source']['answers'][0]['answer'], 'Утром')
 
+    def test_append_after_tree_edit_keeps_both_answers(self):
+        plan = self.call('get')
+        old_answer = plan['source']['answers'][0]
+        self.call('save', options=[self.case], version=0, source_revision=1)
+        self.tree['problem_tree'][0]['answer'] = 'Вечером'
+        problem_spaces.request(self.hub, LOCAL_USER, {**self.tree, 'revision': 1}, 'save')
+        retained = {**self.case, 'evidence': [], 'previous_evidence': {'revision': 1, 'answers': [old_answer]}}
+        self.call('save', options=[retained, self.case], version=1, source_revision=2)
+        saved = self.call('get')['saved']
+        cases = [solutions.task_context.case_with_answers(case, saved['source']) for case in saved['options']]
+        self.assertEqual([(c['evidence_revision'], c['evidence'][0]['answer']) for c in cases],
+                         [(1, 'Утром'), (2, 'Вечером')])
+
     def test_manual_case_requires_only_a_title_until_research(self):
         case = dict.fromkeys(solutions.FIELDS, '') | {'title': 'Заместитель', 'evidence': []}
         with patch('solution_spaces.standalone_answer') as model, patch('solution_spaces.search') as search:

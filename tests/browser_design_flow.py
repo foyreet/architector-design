@@ -279,10 +279,10 @@ def main():
                     page.reload()
                     page.locator('#compose-doc').click()
                     dialog = page.locator('#design-assist-dialog')
-                    expect(dialog).to_contain_text('Дерево проблем: Спрос')
-                    expect(dialog).to_contain_text('Иерархия метрик: Доход')
                     expect(dialog.locator('select')).to_have_count(0)
                     expect(dialog.get_by_role('checkbox', name='Прогноз спроса')).to_be_checked()
+                    expect(dialog).not_to_contain_text('Дерево проблем:')
+                    expect(dialog).not_to_contain_text('Иерархия метрик:')
                     requests = []
                     def fake_proposal(route):
                         requests.append(route.request.post_data_json)
@@ -346,6 +346,40 @@ def main():
                     page.keyboard.press('Escape')
                     page.locator('#design-flow [data-step=solutions]').click()
                     expect(title_field).to_have_value('Ручное согласование')
+
+                    # Mock only generation. Apply, save and reload use the real task.
+                    source = api('solution-spaces/get', {'task_id': document_id, 'id': tree})['source']
+                    titles = ['Напоминание', 'Назначение заместителя', 'Пилот']
+                    proposals = [{**case, 'title': title, 'evidence': [1]} for title in titles]
+                    page.route('**/api/solution-spaces/generate', lambda route: route.fulfill(
+                        json={'source': source, 'options': proposals, 'request': ''}))
+                    page.locator('#generate').click()
+                    preview = page.locator('#proposals')
+                    apply_cases = page.get_by_role('button', name='Добавить выбранные кейсы')
+                    for title in titles:
+                        choice = preview.get_by_role('checkbox', name=title, exact=True)
+                        expect(choice).to_be_checked()
+                        choice.uncheck()
+                    expect(apply_cases).to_be_disabled()
+                    preview.get_by_role('checkbox', name=titles[1]).check()
+                    expect(page.locator('#options article')).to_have_count(2)
+                    apply_cases.click()
+                    cards = page.locator('#options article')
+                    expect(cards).to_have_count(3)
+                    expect(title_field).to_have_value('Ручное согласование')
+                    expect(page.get_by_role('textbox', name='Кейс 3', exact=True)).to_have_value(titles[1])
+                    title_field.fill('Уточнённый ручной кейс')
+                    page.locator('#generate').click()
+                    preview.get_by_role('checkbox', name=titles[0]).uncheck()
+                    preview.get_by_role('checkbox', name=titles[1]).uncheck()
+                    apply_cases.click()
+                    expect(cards).to_have_count(4)
+                    page.locator('#save').click()
+                    expect(page.locator('#status')).to_have_text('Кейсы сохранены.')
+                    page.reload()
+                    expect(cards).to_have_count(4)
+                    for number, title in enumerate([case['title'], 'Уточнённый ручной кейс', titles[1], titles[2]], 1):
+                        expect(page.get_by_role('textbox', name=f'Кейс {number}', exact=True)).to_have_value(title)
 
                     # A saved document with no links opens its own stages instead of the document editor.
                     sections = api('design-documents/get', {'id':document_id})['document']['sections']

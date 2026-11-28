@@ -172,8 +172,6 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     const label = el('label', 'Что нужно отразить в черновике?');
     const brief = document.createElement('textarea');
     brief.rows = 2; label.append(brief); content.append(label);
-    if (problem) content.append(el('p', 'Дерево проблем: ' + problem.title));
-    if (metric) content.append(el('p', 'Иерархия метрик: ' + metric.title));
     if (problem?.shared || metric?.shared) {
       content.append(el('p', 'Среди источников есть дерево, ранее связанное с несколькими задачами. Изменения этого дерева видны во всех этих задачах.'));
     }

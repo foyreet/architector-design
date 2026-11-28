@@ -41,6 +41,7 @@
   });
   function controls() {
     $('add-case').disabled = $('generate').disabled = busy || !source;
+    $('apply').disabled = busy || !proposal || !$('proposals').querySelector('input:checked');
     // Once cases exist, regeneration is a secondary action and saving becomes the primary one.
     $('generate').classList.toggle('primary', !working);
     $('save').hidden = !working;
@@ -76,8 +77,19 @@
       search.append(element('h4', 'Поиск аналогов'));
       for (const [key, label] of Object.entries(labels)) {
         if (!editable) {
-          if (item[key]) card.append(element(key === 'title' ? 'h3' : 'strong', key === 'title' ? item[key] : label));
-          if (key !== 'title' && item[key]) card.append(element('p', item[key]));
+          if (key === 'title') {
+            const heading = document.createElement('h3');
+            const choice = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.value = String(number - 1);
+            choice.append(checkbox, element('span', item.title));
+            heading.append(choice);
+            card.append(heading);
+          } else if (item[key]) {
+            card.append(element('strong', label), element('p', item[key]));
+          }
           continue;
         }
         const field = element('label', label), input = document.createElement('textarea');
@@ -99,11 +111,11 @@
       }
       const refs = document.createElement('details');
       refs.append(element('summary','На каких ответах основан кейс'));
-      for (const i of item.evidence) {
-        const a = plan.source.answers[i - 1];
+      const answers = item.previous_evidence?.answers || item.evidence.map(i => plan.source.answers[i - 1]);
+      for (const a of answers) {
         refs.append(element('strong',a.path.join(' → ')), element('p', a.answer));
       }
-      if (item.evidence.length) card.append(refs);
+      if (answers.length) card.append(refs);
       if (editable) {
         const find = element('button','Найти аналоги в интернете'), note = element('p','');
         const sources = document.createElement('div'); sources.className = 'sources';
@@ -178,17 +190,31 @@
       const result = await api('generate', {request:$('case-request').value});
       if (token !== generation) return;
       proposal = result; cards($('proposals'), proposal, false); $('preview').hidden = false;
-      generateNote(working ? 'Принятые предложения заменят текущие кейсы. Сохранение отдельной кнопкой.' : 'Проверьте кейсы и их связь с запросом и материалами задачи.');
+      generateNote('Отметьте кейсы, которые хотите добавить.');
     } catch (e) { if (token === generation) generateNote(e.message); }
     finally { if (token === generation) { busy = false; $('cancel').hidden = true; controls(); } }
   };
   $('cancel').onclick = $('discard').onclick = () => { hidePreview(); generateNote('Предложение отменено.'); };
+  $('proposals').onchange = controls;
   $('apply').onclick = () => {
     if (!proposal || busy) return;
-    if (working && !confirm('Заменить текущие кейсы и их подборки источников предложенными?')) return;
-    newCases.clear();
-    working = proposal; source = proposal.source; hidePreview(); cards($('options'), working, true);
-    $('workspace').hidden = false; generateNote('Кейсы приняты. Можно искать аналоги и сохранять изменения.'); mark();
+    const selected = Array.from($('proposals').querySelectorAll('input:checked'), input => proposal.options[Number(input.value)]);
+    if (!selected.length) return;
+    // Evidence indexes belong to the answer revision on which the case was based.
+    if (working && working.source.revision !== proposal.source.revision) {
+      for (const item of working.options) {
+        if (item.evidence.length) {
+          item.previous_evidence = {revision:working.source.revision, answers:item.evidence.map(i => working.source.answers[i - 1])};
+          item.evidence = [];
+        }
+      }
+    }
+    working = {...proposal, options:[...(working?.options || []), ...selected]};
+    source = working.source;
+    hidePreview();
+    dirty = true;
+    renderCases();
+    generateNote('Выбранные кейсы добавлены. Нажмите «Сохранить кейсы».');
   };
   $('save').onclick = async () => {
     const missing = [...$('options').querySelectorAll('.case-title textarea')].find(field => !field.value.trim());
