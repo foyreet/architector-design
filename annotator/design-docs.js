@@ -352,7 +352,7 @@
     remove.setAttribute('aria-label', label);
     remove.onclick = () => task(async () => {
       remove.disabled = true;
-      const index = [...item.parentElement.children].indexOf(item);
+      const index = shownTitles().indexOf(title);
       try {
         const members = {};
         if (problem) members.problem = {id:problem.id, revision:problem.revision, case_version:problem.case_version};
@@ -370,7 +370,7 @@
         } catch {}
         await list();
         message(row.id ? 'Документ удалён.' : 'Задача удалена.');
-        const links = $('documents').querySelectorAll('.document-row');
+        const links = shownTitles();
         (links[Math.min(index, links.length - 1)] || $('create')).focus();
       } finally { remove.disabled = false; }
     });
@@ -398,6 +398,21 @@
     item.append(steps, actions);
     return item;
   }
+
+  // The search field narrows the task list by title; «ё» and «е» match each other.
+  const fold = text => text.toLocaleLowerCase('ru').replaceAll('ё', 'е');
+  const shownTitles = () => [...$('documents').querySelectorAll('.task-row:not([hidden]) .document-row')];
+  function filterTasks() {
+    const rows = [...$('documents').querySelectorAll('.task-row')];
+    $('task-filter-row').hidden = mode !== 'mine' || !rows.length;
+    if (!rows.length) $('task-filter').value = '';
+    const typed = $('task-filter').value.trim(), query = fold(typed);
+    for (const row of rows) row.hidden = !fold(row.querySelector('.document-row').textContent).includes(query);
+    const found = shownTitles().length;
+    $('task-filter-empty').hidden = !rows.length || found > 0;
+    $('task-filter-empty').textContent = rows.length && !found ? 'По запросу «' + typed + '» задач нет.' : '';
+  }
+  $('task-filter').addEventListener('input', filterTasks);
 
   const byActivity = (first, second) => second.dataset.activity - first.dataset.activity;
   window.addEventListener('storage', event => {
@@ -436,6 +451,7 @@
       if (!result.releases.length) documents.append(node('p', $('search').value ? 'По этому запросу документов нет.' :
         'В сообществе пока нет опубликованных дизайн-документов.', 'muted'));
     }
+    filterTasks();
     window.scrollTo(0,0);
   }
   async function openRelease(id){
@@ -483,7 +499,8 @@
           tree_id:namingRow.problem?.id, metric_tree_id:namingRow.metric?.id});
         await list();
         $('create-task-dialog').close();
-        $('documents').querySelector(`button[data-task-id="${namingId}"]`)?.focus();
+        // A renamed task can drop out of the current search: return to the search field then.
+        ($('documents').querySelector(`.task-row:not([hidden]) button[data-task-id="${namingId}"]`) || $('task-filter')).focus();
         message('Название сохранено.');
       } else {
         await api('create-task', {id:namingId, title});

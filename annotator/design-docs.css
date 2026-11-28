@@ -117,6 +117,10 @@
 .list-heading h1{margin-right:auto}
 #documents{margin-top:24px}
 #documents>.muted{max-width:60ch}
+/* Task search sits between the heading and the list. */
+.task-filter{margin-top:20px;max-width:420px}
+.task-filter input{margin:0;min-height:44px}
+#task-filter-empty{margin:24px 0 0}
 
 /* Editor: outline column and a readable text column. */
 main#editor{max-width:1120px;display:grid;grid-template-columns:200px minmax(0,1fr);column-gap:40px}
