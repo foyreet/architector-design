@@ -66,7 +66,6 @@
 .visual-editor .toastui-editor-defaultUI-toolbar {height:auto; flex-wrap:wrap; border-radius:8px 8px 0 0}
 .visual-editor .toastui-editor-ww-container {max-height:70vh; overflow:auto}
 .visual-editor .toastui-editor-contents {font:16px/1.7 system-ui; padding:20px}
-.visual-editor .toastui-editor-contents > p {max-width:80ch}
 .visual-editor .toastui-editor-contents table {display:block; max-width:100%; overflow:auto}
 .visual-editor .toastui-editor-popup {max-width:calc(100vw - 64px)}
 .visual-editor .toastui-editor-contents pre {overflow:auto}
