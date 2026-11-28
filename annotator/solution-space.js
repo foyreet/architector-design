@@ -41,6 +41,7 @@
   });
   function controls() {
     $('add-case').disabled = $('generate').disabled = busy || !source;
+    $('apply').disabled = busy || !proposal || !$('proposals').querySelector('input:checked');
     // Once cases exist, regeneration is a secondary action and saving becomes the primary one.
     $('generate').classList.toggle('primary', !working);
     $('save').hidden = !working;
@@ -76,8 +77,19 @@
       search.append(element('h4', 'Поиск аналогов'));
       for (const [key, label] of Object.entries(labels)) {
         if (!editable) {
-          if (item[key]) card.append(element(key === 'title' ? 'h3' : 'strong', key === 'title' ? item[key] : label));
-          if (key !== 'title' && item[key]) card.append(element('p', item[key]));
+          if (key === 'title') {
+            const heading = document.createElement('h3');
+            const choice = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.value = String(number - 1);
+            choice.append(checkbox, element('span', item.title));
+            heading.append(choice);
+            card.append(heading);
+          } else if (item[key]) {
+            card.append(element('strong', label), element('p', item[key]));
+          }
           continue;
         }
         const field = element('label', label), input = document.createElement('textarea');
@@ -183,11 +195,14 @@
     finally { if (token === generation) { busy = false; $('cancel').hidden = true; controls(); } }
   };
   $('cancel').onclick = $('discard').onclick = () => { hidePreview(); generateNote('Предложение отменено.'); };
+  $('proposals').onchange = controls;
   $('apply').onclick = () => {
     if (!proposal || busy) return;
-    if (working && !confirm('Заменить текущие кейсы и их подборки источников предложенными?')) return;
+    const selected = Array.from($('proposals').querySelectorAll('input:checked'), input => proposal.options[Number(input.value)]);
+    if (!selected.length) return;
+    if (working && !confirm('Заменить текущие кейсы и их подборки источников выбранными кейсами?')) return;
     newCases.clear();
-    working = proposal; source = proposal.source; hidePreview(); cards($('options'), working, true);
+    working = {...proposal, options:selected}; source = proposal.source; hidePreview(); cards($('options'), working, true);
     $('workspace').hidden = false; generateNote('Кейсы приняты. Можно искать аналоги и сохранять изменения.'); mark();
   };
   $('save').onclick = async () => {

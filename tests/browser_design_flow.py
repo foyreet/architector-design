@@ -347,6 +347,34 @@ def main():
                     page.locator('#design-flow [data-step=solutions]').click()
                     expect(title_field).to_have_value('Ручное согласование')
 
+                    # Mock only generation. Apply, save and reload use the real task.
+                    source = api('solution-spaces/get', {'task_id': document_id, 'id': tree})['source']
+                    titles = ['Напоминание', 'Назначение заместителя', 'Пилот']
+                    proposals = [{**case, 'title': title, 'evidence': [1]} for title in titles]
+                    page.route('**/api/solution-spaces/generate', lambda route: route.fulfill(
+                        json={'source': source, 'options': proposals, 'request': ''}))
+                    page.locator('#generate').click()
+                    preview = page.locator('#proposals')
+                    apply_cases = page.get_by_role('button', name='Принять выбранные кейсы')
+                    for title in titles:
+                        choice = preview.get_by_role('checkbox', name=title, exact=True)
+                        expect(choice).to_be_checked()
+                        choice.uncheck()
+                    expect(apply_cases).to_be_disabled()
+                    preview.get_by_role('checkbox', name=titles[1]).check()
+                    page.once('dialog', lambda dialog: dialog.dismiss())
+                    apply_cases.click()
+                    expect(title_field).to_have_value('Ручное согласование')
+                    expect(preview.get_by_role('checkbox', name=titles[1])).to_be_checked()
+                    page.once('dialog', lambda dialog: dialog.accept())
+                    apply_cases.click()
+                    expect(page.locator('#options article')).to_have_count(1)
+                    page.locator('#save').click()
+                    expect(page.locator('#status')).to_have_text('Кейсы сохранены.')
+                    page.reload()
+                    expect(page.locator('#options article')).to_have_count(1)
+                    expect(page.get_by_role('textbox', name='Кейс 1', exact=True)).to_have_value(titles[1])
+
                     # A saved document with no links opens its own stages instead of the document editor.
                     sections = api('design-documents/get', {'id':document_id})['document']['sections']
                     blank = api('design-documents/create', {'id':str(uuid.uuid4()), 'title':'Без связей ' + str(width),
