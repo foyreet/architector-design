@@ -310,6 +310,8 @@ def main():
                     page.goto(hub_url)
                     row.locator('.task-step').nth(1).click()
                     page.get_by_role('button', name=re.compile('Дерево шагов ' + str(width))).click()
+                    # The stage is already visible before a tree is chosen: wait for the page opened by the choice.
+                    page.wait_for_url(re.compile(r'/solution-space\.html\?.*\bid='))
                     expect(page.locator('#editor')).to_be_visible()
                     expect(page.locator('#title')).to_have_text(blank['title'])
                     page.goto(hub_url)
