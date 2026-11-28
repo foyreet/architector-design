@@ -322,6 +322,31 @@ def main():
                     saved.locator('.task-step').nth(1).click()
                     expect(page.locator('#title')).to_have_text('Новый дизайн-документ')
 
+                    # Add a manual alternative alongside an existing case and select it in the draft.
+                    add_case = page.get_by_role('button', name='+ Кейс', exact=True)
+                    add_case.click()
+                    title_field = page.get_by_role('textbox', name='Кейс 2', exact=True)
+                    expect(title_field).to_be_focused()
+                    page.locator('#save').click()
+                    expect(page.locator('#status')).to_have_text('Введите название кейса.')
+                    title_field.fill('Ручное согласование')
+                    add_case.click()
+                    page.locator('#options article').last.get_by_text('Отменить добавление').click()
+                    expect(title_field).to_have_value('Ручное согласование')
+                    page.locator('#save').click()
+                    expect(page.locator('#status')).to_have_text('Кейсы сохранены.')
+                    page.reload()
+                    expect(title_field).to_have_value('Ручное согласование')
+                    page.locator('#design-flow [data-step=document]').click()
+                    page.locator('#compose-doc').click()
+                    expect(dialog.get_by_role('checkbox', name='Прогноз спроса')).to_be_visible()
+                    manual_choice = dialog.get_by_role('checkbox', name='Ручное согласование')
+                    manual_choice.check()
+                    expect(manual_choice).to_be_checked()
+                    page.keyboard.press('Escape')
+                    page.locator('#design-flow [data-step=solutions]').click()
+                    expect(title_field).to_have_value('Ручное согласование')
+
                     # A saved document with no links opens its own stages instead of the document editor.
                     sections = api('design-documents/get', {'id':document_id})['document']['sections']
                     blank = api('design-documents/create', {'id':str(uuid.uuid4()), 'title':'Без связей ' + str(width),

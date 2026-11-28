@@ -20,6 +20,8 @@
   // Messages about building cases stay next to the button that starts it.
   const generateNote = text => { $('generate-status').textContent = text; };
   let source, working, proposal, version, dirty = false, generation = 0, busy = false;
+  const newCases = new Set();
+  let savedPlan;
   function element(tag, text) {
     const item = document.createElement(tag);
     item.textContent = text;
@@ -38,7 +40,7 @@
     save:changes => api('save-method', {changes})
   });
   function controls() {
-    $('generate').disabled = busy || !source;
+    $('add-case').disabled = $('generate').disabled = busy || !source;
     // Once cases exist, regeneration is a secondary action and saving becomes the primary one.
     $('generate').classList.toggle('primary', !working);
     $('save').hidden = !working;
@@ -88,7 +90,9 @@
           field.replaceChildren(name, badge);
           input.rows = 1;
         } else input.rows = ['approach','rationale','tradeoffs'].includes(key) ? 3 : 2;
-        input.value = item[key]; input.placeholder = 'Не заполнено';
+        input.value = item[key];
+        input.placeholder = key === 'title' ? 'Название кейса' : 'Не заполнено';
+        input.required = key === 'title';
         input.oninput = () => { item[key] = input.value; mark(); };
         field.append(input);
         (searchKeys.includes(key) ? search : card).append(field);
@@ -119,15 +123,48 @@
           } catch (e) { note.textContent = e.message; }
           finally { busy = false; controls(); }
         };
-        const hint = element('p','В поисковые сервисы будут отправлены два запроса выше.');
+        const hint = element('p','Для поиска заполните оба запроса. Они будут отправлены в поисковые сервисы.');
+        const searchReady = () => { find.disabled = ![item.title, item.business_query, item.query].every(value => value.trim()); };
+        card.addEventListener('input', searchReady);
+        searchReady();
         hint.className = 'search-hint';
         search.append(hint, find, note, sources);
         card.append(search);
         showSources(sources,item.sources);
+        if (newCases.has(item)) {
+          const cancel = element('button', 'Отменить добавление');
+          cancel.onclick = () => {
+            newCases.delete(item);
+            working.options.splice(working.options.indexOf(item), 1);
+            if (!working.options.length) working = null;
+            dirty = JSON.stringify(working) !== savedPlan;
+            renderCases();
+            status(dirty ? 'Есть несохранённые изменения.' : 'Добавление отменено.');
+            $('add-case').focus();
+          };
+          card.append(cancel);
+        }
       }
       container.append(card);
     }
   }
+  function renderCases() {
+    $('workspace').hidden = !working;
+    if (working) cards($('options'), working, true);
+    else $('options').replaceChildren();
+    controls();
+  }
+  $('add-case').onclick = () => {
+    if (!working) working = {source, request:$('case-request').value, options:[]};
+    const item = Object.fromEntries(Object.keys(labels).map(key => [key, '']));
+    item.evidence = [];
+    working.options.push(item);
+    newCases.add(item);
+    dirty = true;
+    renderCases();
+    status('Введите название и сохраните кейсы.');
+    $('options').lastElementChild.querySelector('.case-title textarea').focus();
+  };
   function hidePreview() {
     generation++; proposal = null; busy = false;
     $('preview').hidden = $('cancel').hidden = true; controls();
@@ -149,10 +186,17 @@
   $('apply').onclick = () => {
     if (!proposal || busy) return;
     if (working && !confirm('Заменить текущие кейсы и их подборки источников предложенными?')) return;
+    newCases.clear();
     working = proposal; source = proposal.source; hidePreview(); cards($('options'), working, true);
     $('workspace').hidden = false; generateNote('Кейсы приняты. Можно искать аналоги и сохранять изменения.'); mark();
   };
   $('save').onclick = async () => {
+    const missing = [...$('options').querySelectorAll('.case-title textarea')].find(field => !field.value.trim());
+    if (missing) {
+      status('Введите название кейса.');
+      missing.focus();
+      return;
+    }
     busy = true; controls();
     try {
       const result = await api('save', {version, source_revision:working.source.revision, options:working.options, request:working.request || ''});
@@ -163,7 +207,12 @@
         history.replaceState(null, '', window.designFlow.url('solutions'));
         $('library').hidden = true;
       }
-      version = result.version; dirty = false; status('Кейсы сохранены.');
+      version = result.version;
+      savedPlan = JSON.stringify(working);
+      newCases.clear();
+      dirty = false;
+      renderCases();
+      status('Кейсы сохранены.');
     } catch (e) { status(e.message); }
     finally { busy = false; controls(); }
   };
@@ -178,6 +227,7 @@
     window.designFlow.remember('solutions');
     $('editor').hidden = false;
     pendingTree = data.pending_tree; source = data.source; version = data.version; working = data.saved;
+    savedPlan = JSON.stringify(working);
     $('title').textContent = taskTitle || source.title; $('problem').textContent = source.problem;
     for (const a of source.answers) $('answers').append(element('strong', a.path.join(' → ')),element('p', a.answer));
     if (data.shared) status('Это дерево уже связано с несколькими задачами. Изменения кейсов видны в каждой из них.');

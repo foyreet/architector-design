@@ -96,13 +96,13 @@ def source(row):
     return {'title': row['title'], 'problem': row['problem'], 'answers': answers, 'revision': row['revision']}
 
 
-def validate(options, context):
+def validate(options, context, required):
     if not isinstance(options, list) or not options:
         raise ValueError()
     for item in options:
         if not isinstance(item, dict) or set(item) - {'sources'} != {*FIELDS, 'evidence'}:
             raise ValueError()
-        if any(not isinstance(item[k], str) or (k != 'assumptions' and not item[k].strip()) for k in FIELDS):
+        if any(not isinstance(item[k], str) for k in FIELDS) or any(not item[k].strip() for k in required):
             raise ValueError()
         sources = item.get('sources', [])
         if not isinstance(sources, list):
@@ -160,7 +160,7 @@ def request(hub, user, body, action):
             else:
                 raise ContractError('Исходные ответы изменились. Обновите страницу и запросите варианты ещё раз.', 409)
             try:
-                options = validate(body.get('options'), context)
+                options = validate(body.get('options'), context, ('title',))
             except ValueError:
                 raise ContractError('Проверьте заполнение вариантов и ссылки на ответы.') from None
             if not row:
@@ -184,9 +184,9 @@ def request(hub, user, body, action):
             if body.get('source_revision') != context['revision']:
                 raise ContractError('Ответы изменились. Сначала обновите кейсы.', 409)
             try:
-                case = validate([body.get('case')], context)[0]
+                case = validate([body.get('case')], context, ('title', 'business_query', 'query'))[0]
             except ValueError:
-                raise ContractError('Заполните поля кейса и поисковый запрос.') from None
+                raise ContractError('Для поиска укажите название кейса и оба поисковых запроса. Проверьте ссылки на ответы.') from None
         elif action != 'generate':
             raise ContractError('Маршрут решений не найден.', 404)
     materials = task_context.saved_materials(hub, user, body, 'solutions')
@@ -206,7 +206,7 @@ def request(hub, user, body, action):
     if reply.startswith('```json') and reply.endswith('```'):
         reply = reply[7:-3]
     try:
-        options = validate(json.loads(reply), current)
+        options = validate(json.loads(reply), current, set(FIELDS) - {'assumptions'})
         for option in options:
             option.pop('sources', None)
     except (ValueError, RecursionError):
