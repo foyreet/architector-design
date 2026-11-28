@@ -1,6 +1,7 @@
 """Candidate architectures grounded in a revision of a problem tree."""
 import json
 import time
+import uuid
 
 import task_context
 import tree_methods
@@ -128,13 +129,18 @@ def request(hub, user, body, action):
                                  FROM problem_spaces AS p LEFT JOIN solution_spaces AS s ON s.tree_id = p.id
                                  WHERE p.owner = ? ORDER BY has_cases DESC, p.updated DESC, p.id""", (user['id'],))
             return {'trees': [dict(row) for row in rows]}
-        tree_id = identity(body.get('id'))
         db.execute('BEGIN IMMEDIATE')
+        title, links, _ = task_context.task_record(db, user['id'], body)
+        tree_id = body.get('id')
+        if not tree_id and action == 'get' and body.get('task_id'):
+            tree_id = links.get('tree_id') or str(uuid.uuid4())
+        tree_id = identity(tree_id)
         row = db.execute('SELECT * FROM problem_spaces WHERE id=? AND owner=?', (tree_id, user['id'])).fetchone()
         if row:
+            if body.get('task_id') and links.get('tree_id') != tree_id:
+                raise ContractError('Это дерево не связано с задачей. Откройте этап из списка задач.', 409)
             current = source(row)
         else:
-            title, links, _ = task_context.task_record(db, user['id'], body)
             if not body.get('task_id') or not (title or links) or links.get('tree_id') not in (None, tree_id):
                 raise ContractError('Исходное дерево не найдено.', 404)
             current = {'title': title or 'Задача', 'problem':'', 'answers':[], 'revision':1}
@@ -142,7 +148,9 @@ def request(hub, user, body, action):
         saved = json.loads(record['content']) if record else None
         version = record['version'] if record else 0
         if action == 'get':
-            return {'source': current, 'saved': saved, 'version': version, 'pending_tree':row is None}
+            return {'id': tree_id, 'source': current, 'saved': saved, 'version': version, 'pending_tree':row is None,
+                    'shared':bool(row and body.get('task_id') and task_context.used_by_other_task(
+                        db, user['id'], body['task_id'], 'tree_id', tree_id))}
         if action == 'save':
             generation = body.get('source_revision')
             if generation == current['revision']:

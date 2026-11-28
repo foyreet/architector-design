@@ -1,6 +1,7 @@
 """Steps between problem, solution, metric trees and the design document with isolated data."""
 from pathlib import Path
 import os
+import json
 import re
 import socket
 import subprocess
@@ -19,6 +20,47 @@ project = '11111111-2222-4333-8444-555555555555'
 
 def overlaps(a, b):
     return a['x'] < b['x'] + b['width'] and b['x'] < a['x'] + a['width'] and a['y'] < b['y'] + b['height'] and b['y'] < a['y'] + a['height']
+
+
+def check_task_navigation(page, origin, api, doc, foreign, ids):
+    for path, name in [('problem-space', 'tree_id'), ('metric-tree', 'metric_tree_id')]:
+        page.goto(f'{origin}/{path}.html?doc={foreign["id"]}')
+        expect(page.locator('#title')).to_have_value(foreign['title'])
+        page.goto(f'{origin}/{path}.html?doc={doc}')
+        expect(page.locator('#formulation')).to_have_value('Прогноз' if name == 'tree_id' else 'Рост')
+        assert parse_qs(urlsplit(page.url).query)['id'] == [ids[name]]
+    page.goto(f'{origin}/problem-space.html?doc={doc}')
+    page.locator('#tree-origin').click()
+    with page.expect_file_chooser() as choice:
+        page.get_by_role('button', name='Заменить содержимое из JSON').click()
+    choice.value.set_files({'name':'tree.json', 'mimeType':'application/json',
+                            'buffer':json.dumps({'format':'architect.problem-space', 'version':1,
+                                                 'problem':'Импорт', 'problem_tree':[]}).encode()})
+    expect(page.locator('#formulation')).to_have_value('Импорт')
+    assert api('problem-spaces/get', {'id':ids['tree_id']})['problem'] == 'Прогноз'
+    page.locator('#save').click()
+    expect(page.locator('#status')).to_have_text('Сохранено')
+    page.reload()
+    expect(page.locator('#formulation')).to_have_value('Импорт')
+    record = api('design-documents/get', {'id':doc})['document']
+    assert record['task_links']['tree_id'] == ids['tree_id']
+    ref = {'tree_id':ids['tree_id'], 'title':'Источник', 'revision':1, 'version':0, 'answers':[], 'cases':[]}
+    api('design-documents/save', {**record, 'sources':{'target':ref, 'problem':{**ref, 'tree_id':foreign['task_links']['tree_id']}}})
+    page.goto(f'{origin}/design-docs.html?id={doc}')
+    sections = page.locator('.section-sources')
+    expect(sections).to_have_count(2)
+    sections.first.locator('summary').click()
+    expect(sections.first).to_contain_text('Исторический источник')
+    expect(sections.first.locator('a')).to_have_count(0)
+    sections.last.locator('summary').click()
+    with page.expect_popup() as source:
+        sections.last.locator('a').click()
+    tab = source.value
+    expect(tab.locator('#formulation')).to_have_value('Импорт')
+    tab.locator('#design-flow [data-step=document]').click()
+    expect(tab.locator('#section-problem')).to_have_value(record['sections']['problem'])
+    assert parse_qs(urlsplit(tab.url).query)['id'] == [doc]
+    tab.close()
 
 
 def main():
@@ -203,6 +245,7 @@ def main():
 
                     # Design document: the outline follows filled sections.
                     page.goto(origin + '/design-docs.html?new=1')
+                    expect(page.locator('#doc-outline a')).to_have_count(6)
                     sections = page.locator('#sections .doc-section > label').all_text_contents()
                     outline_names = page.locator('#doc-outline a').evaluate_all(
                         'links => links.map(link => link.firstChild.textContent)')
@@ -231,25 +274,25 @@ def main():
                         assert reply.ok, reply.text()
                         return reply.json()
 
-                    metric = str(uuid.uuid4())
-                    api('metric-trees/save', {'id':metric, 'title':'Доход', 'goal':'Рост', 'metrics':[], 'revision':0})
-                    case = dict.fromkeys(('title','validation','rationale','approach','tradeoffs','assumptions','business_query','query'), 'Прогноз спроса')
-                    api('solution-spaces/save', {'id':tree,'source_revision':1,'version':0,'options':[{**case,'evidence':[1]}]})
-                    page.locator('#link-task').click()
-                    dialog = page.locator('#design-assist-dialog')
-                    dialog.get_by_label('Дерево проблем').select_option(tree)
-                    dialog.get_by_role('checkbox', name='Прогноз спроса').check()
-                    dialog.get_by_label('Иерархия метрик').select_option(metric)
-                    dialog.get_by_role('button', name='Применить связи').click()
                     page.locator('#save').click()
                     expect(page.locator('#save-status')).to_have_text('Все изменения сохранены')
                     document_id = parse_qs(urlsplit(page.url).query)['id'][0]
-                    links = api('design-documents/get', {'id':document_id})['document']['task_links']
-                    assert links == {'tree_id':tree, 'metric_tree_id':metric, 'cases':[1], 'case_version':1}
+                    foreign_tree = tree
+                    tree, metric = str(uuid.uuid4()), str(uuid.uuid4())
+                    api('problem-spaces/save', {'doc':document_id, 'id':tree, 'title':'Спрос', 'problem':'Прогноз',
+                        'revision':0, 'problem_tree':[{'question':'Где?', 'answer':'Склад', 'children':[]},
+                                                     {'question':'Когда?', 'answer':'', 'children':[]}]})
+                    api('metric-trees/save', {'doc':document_id, 'id':metric, 'title':'Доход', 'goal':'Рост', 'metrics':[], 'revision':0})
+                    case = dict.fromkeys(('title','validation','rationale','approach','tradeoffs','assumptions','business_query','query'), 'Прогноз спроса')
+                    api('solution-spaces/save', {'task_id':document_id, 'id':tree,'source_revision':1,'version':0,'options':[{**case,'evidence':[1]}]})
+                    catalogs = []
+                    page.on('request', lambda r: catalogs.append(r.url) if re.search(r'/api/(problem-spaces|solution-spaces|metric-trees)/list$', r.url) else None)
                     page.reload()
                     page.locator('#compose-doc').click()
-                    expect(dialog.get_by_label('Дерево проблем')).to_have_value(tree)
-                    expect(dialog.get_by_label('Иерархия метрик')).to_have_value(metric)
+                    dialog = page.locator('#design-assist-dialog')
+                    expect(dialog).to_contain_text('Дерево проблем: Спрос')
+                    expect(dialog).to_contain_text('Иерархия метрик: Доход')
+                    expect(dialog.locator('select')).to_have_count(0)
                     expect(dialog.get_by_role('checkbox', name='Прогноз спроса')).to_be_checked()
                     requests = []
                     def fake_proposal(route):
@@ -309,15 +352,23 @@ def main():
                     assert api('design-documents/get', blank)['document']['task_links'] == {}
                     page.goto(hub_url)
                     row.locator('.task-step').nth(1).click()
-                    page.get_by_role('button', name=re.compile('Дерево шагов ' + str(width))).click()
-                    # The stage is already visible before a tree is chosen: wait for the page opened by the choice.
-                    page.wait_for_url(re.compile(r'/solution-space\.html\?.*\bid='))
                     expect(page.locator('#editor')).to_be_visible()
+                    expect(page.locator('#library')).to_be_hidden()
                     expect(page.locator('#title')).to_have_text(blank['title'])
+                    page.goto(hub_url)
+                    row.locator('.task-step').nth(3).click()
+                    page.locator('#compose-doc').click()
+                    expect(dialog).to_contain_text('Можно начать с описания задачи')
+                    expect(dialog.locator('select, input[type=checkbox]')).to_have_count(0)
                     page.goto(hub_url)
                     row.locator('.task-step').nth(0).click()
                     expect(page.locator('#title')).to_have_value(blank['title'])
+                    page.locator('#save').click()
+                    expect(page.locator('#status')).to_have_text('Сохранено')
+                    new_tree = parse_qs(urlsplit(page.url).query)['id'][0]
+                    assert new_tree not in (tree, foreign_tree)
                     page.goto(hub_url)
+                    expect(row.locator('.task-step').first).to_contain_text('нет вопросов')
                     row.locator('.task-step').nth(2).click()
                     expect(page.locator('#tree-origin')).to_contain_text(blank['title'])
                     page.locator('#save').click()
@@ -327,10 +378,12 @@ def main():
                     row.locator('.task-step').nth(2).click()
                     expect(page.locator('#title')).to_have_value(blank['title'])
                     saved_doc = api('design-documents/get', blank)['document']
-                    assert saved_doc['task_links'] == {'metric_tree_id':new_metric, 'tree_id':tree}
+                    assert saved_doc['task_links'] == {'metric_tree_id':new_metric, 'tree_id':new_tree}
                     assert saved_doc['sections'] == blank['sections']
 
-                    # The two tasks share a problem tree and resume at different stages.
+                    assert not catalogs, catalogs
+
+                    # Each task resumes at its own last stage.
                     page.goto(hub_url)
                     saved.locator('.document-row').click()
                     expect(page.locator('#title')).to_have_text('Новый дизайн-документ')
@@ -415,6 +468,8 @@ def main():
                     page.reload()
                     expect(cards[1]).to_be_visible()
                     expect(cards[0]).to_have_count(0)
+                    assert not errors, errors
+                    check_task_navigation(page, origin, api, document_id, saved_doc, {'tree_id':tree, 'metric_tree_id':metric})
                     assert not errors, errors
                     print(width, 'PASS design flow', flush=True)
                     context.close()

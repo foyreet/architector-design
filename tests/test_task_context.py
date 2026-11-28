@@ -85,3 +85,90 @@ class ContextTests(unittest.TestCase):
         self.assertFalse(self.call(design_documents, 'list')['documents'])
         with self.assertRaises(ContractError):
             solution_spaces.request(self.hub, {'id':'other'}, {'id':self.tree,'task_id':self.task}, 'get')
+
+    def test_only_linked_materials_available_to_task(self):
+        other = uid()
+        self.call(design_documents, 'create-task', id=other, title='Другая задача')
+        self.call(solution_spaces, 'save', task_id=self.task, id=self.tree, version=0,
+                  source_revision=1, request='Подписка', options=[self.case])
+        self.call(metric_trees, 'save', id=self.metric, title='Маржа', draft_task=self.task,
+                  goal='Рост', metrics=[self.node], revision=0)
+        own = self.call(design_documents, 'task-sources', task_id=self.task)
+        self.assertEqual(own['problem']['cases'], [self.case['title']])
+        self.assertFalse(own['problem']['shared'])
+        self.assertEqual(own['metric']['id'], self.metric)
+        self.assertEqual(self.call(solution_spaces, 'get', task_id=self.task)['id'], self.tree)
+        self.assertEqual(self.call(design_documents, 'task-sources', task_id=other, task_tree_id=self.tree),
+                         {'problem':None, 'metric':None})
+        blank = self.call(solution_spaces, 'get', task_id=other)
+        self.assertTrue(blank['pending_tree'])
+        self.assertIsNone(blank['saved'])
+        with self.assertRaises(ContractError):
+            self.call(solution_spaces, 'get', id=self.tree, task_id=other)
+        with self.assertRaises(ContractError):
+            self.call(problem_spaces, 'attach', id=self.tree, draft_task=other)
+        for key, value in [('tree_id', self.tree), ('metric_tree_id', self.metric)]:
+            with self.subTest(key=key), self.assertRaises(ContractError), patch('design_assistant.standalone_answer') as model:
+                self.call(design_assistant, 'compose', title='Другая задача', task_id=other,
+                          sections=self.sections, **{key:value})
+            model.assert_not_called()
+        # A pre-existing shared reference is reported without rewriting either task.
+        with self.assertRaises(ContractError):
+            self.call(design_documents, 'create', id=uid(), title='Другой документ', sections=self.sections,
+                      task_links={'tree_id':self.tree})
+        legacy = self.call(design_documents, 'create', id=uid())['document']
+        with self.hub.db() as db:
+            db.execute('UPDATE design_documents SET task_links=? WHERE id=?',
+                       (json.dumps({'tree_id':self.tree}), legacy['id']))
+        self.assertTrue(self.call(design_documents, 'task-sources', task_id=self.task)['problem']['shared'])
+        self.assertTrue(self.call(solution_spaces, 'get', task_id=self.task)['shared'])
+        detached = self.call(design_documents, 'separate-shared', id=self.task)
+        self.assertEqual(detached, self.call(design_documents, 'separate-shared', id=self.task))
+        self.assertEqual(detached['task_links']['metric_tree_id'], self.metric)
+        self.assertNotEqual(detached['task_links']['tree_id'], self.tree)
+        self.assertEqual(self.call(solution_spaces, 'get', task_id=self.task)['saved']['options'], [self.case])
+        self.assertFalse(self.call(solution_spaces, 'get', task_id=legacy['id'])['shared'])
+
+    def test_separate_document_clones_stages_and_provenance_once(self):
+        self.call(solution_spaces, 'save', task_id=self.task, id=self.tree, options=[self.case],
+                  version=0, source_revision=1, request='Кейсы')
+        self.call(metric_trees, 'save', draft_task=self.task, id=self.metric, revision=0, title='Метрика',
+                  goal='Рост', metrics=[self.node])
+        ref = {'tree_id':self.tree, 'title':'Источник', 'revision':1, 'version':1, 'cases':[], 'answers':[],
+               'metric_tree':{'id':self.metric, 'title':'Доход', 'goal':'Цель', 'revision':1, 'nodes':[]}}
+        self.call(design_documents, 'create', id=self.task, sections=self.sections, title='Продление')
+        historical = {**ref, 'tree_id':uid()}
+        body = dict(id=uid(), original_id=self.task, sections=self.sections, title='Отдельно',
+                    task_links={'tree_id':self.tree, 'cases':[1], 'case_version':1},
+                    sources={'target':ref, 'problem':historical})
+        copied = self.call(design_documents, 'duplicate', **body)['document']
+        self.assertEqual(copied, self.call(design_documents, 'duplicate', **body)['document'])
+        links = copied['task_links']
+        self.assertNotEqual(links['tree_id'], self.tree)
+        self.assertNotEqual(links['metric_tree_id'], self.metric)
+        self.assertEqual(copied['sources']['target']['tree_id'], links['tree_id'])
+        self.assertEqual(copied['sources']['target']['metric_tree']['id'], links['metric_tree_id'])
+        self.assertEqual(copied['sources']['problem']['tree_id'], historical['tree_id'])
+        scope = dict(task_id=copied['id'], id=links['tree_id'])
+        self.assertEqual(self.call(solution_spaces, 'get', **scope)['saved']['options'], [self.case])
+        self.call(solution_spaces, 'save', **scope, options=[{**self.case, 'title':'Новый'}],
+                  version=1, source_revision=1)
+        self.assertEqual(self.call(solution_spaces, 'get', task_id=self.task)['saved']['options'], [self.case])
+
+    def test_stale_links_and_historical_review(self):
+        self.call(metric_trees, 'save', draft_task=self.task, id=self.metric, title='Своя', revision=0,
+                  goal='Рост', metrics=[self.node])
+        other = uid()
+        self.call(design_documents, 'create-task', id=other, title='Другая')
+        with self.assertRaises(ContractError):
+            self.call(design_documents, 'create', id=other, task_links={'metric_tree_id':self.metric})
+        task = self.call(design_documents, 'task-navigation', task_id=other, task_metric_tree_id=self.metric)
+        self.assertEqual(task['links'], {})
+        with self.assertRaises(ContractError):
+            self.call(metric_trees, 'get', task_id=other, id=self.metric)
+        ref = {'metric_tree':{'id':self.metric,'title':'Своя','goal':'Рост','revision':1,'nodes':[]}}
+        for task_id, expected in [(other, {}), (self.task, {'target':ref['metric_tree']})]:
+            with patch('design_assistant.standalone_answer', return_value='[]') as model:
+                self.call(design_assistant, 'review', task_id=task_id, title='Ревью', sections=self.sections,
+                          sources={'target':ref})
+                self.assertEqual(json.loads(model.call_args.args[1])['metric_sources'], expected)

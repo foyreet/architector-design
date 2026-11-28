@@ -170,11 +170,17 @@
   window.addEventListener('beforeunload', e => { if (dirty) e.preventDefault(); });
   async function start() {
     const data = await api('get');
+    if (!id && !data.pending_tree) {
+      window.designFlow.treeOpened('tree', data.id, true);
+      history.replaceState(null, '', window.designFlow.url('solutions'));
+    }
+    id = data.id;
     window.designFlow.remember('solutions');
     $('editor').hidden = false;
     pendingTree = data.pending_tree; source = data.source; version = data.version; working = data.saved;
     $('title').textContent = taskTitle || source.title; $('problem').textContent = source.problem;
     for (const a of source.answers) $('answers').append(element('strong', a.path.join(' → ')),element('p', a.answer));
+    if (data.shared) status('Это дерево уже связано с несколькими задачами. Изменения кейсов видны в каждой из них.');
     if (working) { cards($('options'), working, true); $('workspace').hidden = false; }
     $('case-request').value = working?.request || '';
     $('context').hidden = !source.answers.length;
@@ -191,54 +197,41 @@
     status('');
     const list = $('tree-list');
     window.designFlow.remember('solutions');
-    const attachDoc = params.has('attach') && params.get('doc');
-    const draftTask = params.has('draft') && params.get('doc');
-    if (!trees.length || attachDoc || draftTask) {
+    if (!trees.length) {
       const create = element('a', 'Создать дерево проблем');
-      const url = page('/problem-space.html');
-      url.searchParams.set('new', '1');
-      if (attachDoc) url.searchParams.set('attach', '1');
-      create.href = url;
-      list.append(element('p', attachDoc || draftTask ? 'При желании можно связать задачу с существующим деревом.' :
-        'Пока нет сохранённых деревьев.'), create);
+      create.href = '/problem-space.html?new=1';
+      list.append(element('p', 'Пока нет сохранённых деревьев.'), create);
     }
     for (const tree of trees) {
-      const link = document.createElement(attachDoc || draftTask ? 'button' : 'a');
+      const link = element('a', '');
       link.className = 'document-row';
-      const target = page('/solution-space.html', tree.id);
-      if (attachDoc || draftTask) {
-        link.onclick = async () => {
-          if (list.inert) return;
-          list.inert = true;
-          try {
-            const task = draftTask ? {draft_task:draftTask, companion:params.get('metric')} : {doc:attachDoc};
-            await api('attach', {...task, id:tree.id}, 'problem-spaces');
-            location.assign(target);
-          } catch (error) { status(error.message); list.inert = false; }
-        };
-      } else link.href = target;
+      link.href = page('/solution-space.html', tree.id);
       link.append(element('strong', tree.title), element('small', tree.has_cases ? 'Есть сохранённые кейсы' : 'Кейсы ещё не созданы'));
       list.append(link);
     }
   }
   // A step link may point at a tree that exists only as an unsaved draft: offer the saved ones instead.
   async function fallback(error) {
-    if (error.status !== 404) throw error;
+    if (error.status !== 404 || params.has('doc')) throw error;
     await library();
     status('Это дерево ещё не сохранено. Выберите сохранённое дерево или вернитесь к вопросам.');
   }
   let taskTitle, pendingTree;
   async function openStage() {
-    taskTitle = await window.designFlow.taskTitle();
+    const task = await window.designFlow.resolveTask();
+    if (task) {
+      taskTitle = task.title;
+      id = task.links.tree_id;
+      const current = window.designFlow.url('solutions');
+      if (params.has('version') && params.get('id') === id) current.searchParams.set('version', params.get('version'));
+      if (params.get('id') === id) current.hash = location.hash;
+      history.replaceState(null, '', current);
+    }
     if (taskTitle) {
       $('title').textContent = taskTitle;
       document.title = taskTitle + ' · ' + document.title;
     }
-    if (!id && params.has('doc')) {
-      id = crypto.randomUUID();
-      await start();
-      await library();
-    } else if (id) await start().catch(fallback);
+    if (id || params.has('doc')) await start().catch(fallback);
     else await library();
   }
   openStage().catch(e => status(e.message));

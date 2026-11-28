@@ -126,6 +126,14 @@ def attach_stage(db, user, doc_id, tree_id, metrics):
 
 
 def bind_tree(db, user, body, tree_id, metrics):
+    scoped = body.get('draft_task') or body.get('doc')
+    if scoped:
+        _, linked, _ = task_context.task_record(db, user['id'], {'task_id':scoped})
+        own_key = 'metric_tree_id' if metrics else 'tree_id'
+        other_key = 'tree_id' if metrics else 'metric_tree_id'
+        for key, candidate in ((own_key, tree_id), (other_key, body.get('companion'))):
+            if candidate and linked.get(key) != candidate and task_context.used_by_other_task(db, user['id'], scoped, key, candidate):
+                raise ContractError('Дерево уже связано с другой задачей. Откройте этап из списка задач.', 409)
     if 'draft_task' not in body:
         if 'doc' in body:
             attach_stage(db, user, body['doc'], tree_id, metrics)
@@ -153,6 +161,11 @@ def stored_tree(hub, user, body, action, *, metrics):
     table = 'metric_trees' if metrics else 'problem_spaces'
     nodes_key = 'metrics' if metrics else 'problem_tree'
     goal_key = 'goal' if metrics else 'problem'
+    if action == 'validate-import':
+        if metrics:
+            from metric_trees import content as metric_content
+            return metric_content(body)
+        return content(body)
     with hub.db() as db:
         owner = user['id']
         if action == 'list':
@@ -162,6 +175,11 @@ def stored_tree(hub, user, body, action, *, metrics):
         tree_id = identity(body.get('id'))
         db.execute('BEGIN IMMEDIATE')
         row = db.execute(f'SELECT * FROM {table} WHERE id=? AND owner=?', (tree_id, owner)).fetchone()
+        if body.get('task_id'):
+            _, links, _ = task_context.task_record(db, owner, body)
+            expected = links.get('metric_tree_id' if metrics else 'tree_id')
+            if expected != tree_id and (expected or row):
+                raise ContractError('Дерево задачи изменилось. Откройте этап из списка задач.', 412)
         if action == 'get':
             if not row:
                 raise ContractError('Дерево не найдено.', 404)

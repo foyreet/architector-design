@@ -8,14 +8,17 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     item.textContent = text;
     return item;
   }
-  function url(path, id) {
-    const link = new URL(path, location.origin);
-    link.searchParams.set('id', id);
-    const project = new URLSearchParams(location.search).get('project');
-    if (project) link.searchParams.set('project', project);
-    return link;
-  }
-  function link(text, href) {
+  let unavailable = new Set();
+  function sourceLink(text, step, id, version, caseId) {
+    const expected = step === 'metrics' ? links.metric_tree_id : links.tree_id;
+    if (id !== expected || unavailable.has(step + '/' + id)) {
+      return el('span', text + ' · Исторический источник');
+    }
+    const href = window.designFlow.url(step);
+    if (caseId) {
+      href.searchParams.set('version', version);
+      href.hash = 'case-' + caseId;
+    }
     const item = el('a', text);
     item.href = href;
     item.target = '_blank';
@@ -25,17 +28,15 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
   function evidence(ref) {
     const box = el('details', '');
     box.append(el('summary', 'Источники раздела'));
-    if (ref.tree_id) box.append(link(ref.title + ' · версия ' + ref.revision, url('/problem-space.html', ref.tree_id)));
+    if (ref.tree_id) box.append(sourceLink(ref.title + ' · версия ' + ref.revision, 'problems', ref.tree_id));
     for (const a of ref.answers || []) box.append(el('p', a.path.join(' → ') + ' — ' + a.answer));
     for (const c of ref.cases || []) {
-      const target = url('/solution-space.html', ref.tree_id);
-      target.searchParams.set('version', ref.version);
-      target.hash = 'case-' + c.id;
-      box.append(el('p', 'Кейс из версии ' + ref.version + ' · '), link(c.title, target));
+      box.append(el('p', 'Кейс из версии ' + ref.version + ' · '),
+        sourceLink(c.title, 'solutions', ref.tree_id, ref.version, c.id));
     }
     const tree = ref.metric_tree;
     if (tree) {
-      box.append(el('p', 'Иерархия метрик'), link(tree.title + ' · версия ' + tree.revision, url('/metric-tree.html', tree.id)));
+      box.append(el('p', 'Иерархия метрик'), sourceLink(tree.title + ' · версия ' + tree.revision, 'metrics', tree.id));
       if (tree.goal) box.append(el('p', 'Бизнес-цель: ' + tree.goal));
       for (const node of tree.nodes) {
         const details = el('details', '');
@@ -65,23 +66,33 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     const versions = new Map();
     function latest(endpoint, id) {
       const key = endpoint + '/' + id;
-      if (!versions.has(key)) versions.set(key, api('get', {id}, endpoint).catch(() => null));
+      if (!versions.has(key)) versions.set(key, api('get', {...window.designFlow.aiScope(), id}, endpoint).catch(() => null));
       return versions.get(key);
     }
-    const stale = [];
+    const stale = [], missing = new Set();
     for (const [key, label] of fields) {
       const ref = current[key];
       if (!ref) continue;
       const [state, metric] = await Promise.all([
-        ref.tree_id && latest('solution-spaces', ref.tree_id),
-        ref.metric_tree && latest('metric-trees', ref.metric_tree.id)
+        ref.tree_id && ref.tree_id === links.tree_id && latest('solution-spaces', ref.tree_id),
+        ref.metric_tree && ref.metric_tree.id === links.metric_tree_id && latest('metric-trees', ref.metric_tree.id)
       ]);
       if (documentId !== getId() || current !== refs) return;
+      if (ref.tree_id && !state) {
+        missing.add('problems/' + ref.tree_id);
+        missing.add('solutions/' + ref.tree_id);
+      }
+      if (ref.metric_tree && !metric) missing.add('metrics/' + ref.metric_tree.id);
       const treeChanged = state && state.source.revision !== ref.revision &&
         (!ref.answers.length || ref.problem !== state.source.problem || ref.title !== state.source.title ||
          ref.answers.some(a => !state.source.answers.some(b => b.answer === a.answer && JSON.stringify(b.path) === JSON.stringify(a.path))));
       if ((ref.tree_id && (!state || treeChanged || (ref.cases.length && state.version !== ref.version))) ||
           (ref.metric_tree && metric?.revision !== ref.metric_tree.revision)) stale.push(label);
+    }
+    if (documentId !== getId() || current !== refs) return;
+    if (missing.size !== unavailable.size || [...missing].some(key => !unavailable.has(key))) {
+      unavailable = missing;
+      showRefs();
     }
     $('source-update').textContent = stale.length ? 'Проверьте источники разделов: ' + stale.join(', ') + '. Можно собрать новый черновик.' : '';
   }
@@ -152,107 +163,45 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     });
     content.scrollIntoView({block:'start'});
   }
-  async function compose(bindOnly = false) {
-    const active = open(bindOnly ? 'Связать этапы задачи' : 'Собрать черновик');
-    status('Загружаем деревья…');
-    const [problems, metrics] = await Promise.all([api('list', {}, 'solution-spaces'), api('list', {}, 'metric-trees')]);
+  async function compose() {
+    const active = open('Собрать черновик');
+    status('Загружаем материалы задачи…');
+    const {problem, metric} = await api('task-sources');
     if (token !== active) return;
-    const content = $('assist-content'), trees = problems.trees;
-    function picker(caption, empty, options) {
-      const label = el('label', caption), select = document.createElement('select');
-      select.append(new Option(empty, ''));
-      options.forEach(t => select.append(new Option(t.title, t.id)));
-      label.append(select); content.append(label);
-      return select;
-    }
+    const content = $('assist-content');
+    const label = el('label', 'Что нужно отразить в черновике?');
     const brief = document.createElement('textarea');
-    if (!bindOnly) {
-      const label = el('label', 'Что нужно отразить в черновике?');
-      brief.rows = 2; label.append(brief); content.append(label);
-      content.append(el('p', 'Модель учтёт текущий текст документа и выбранные материалы задачи.'));
+    brief.rows = 2; label.append(brief); content.append(label);
+    if (problem) content.append(el('p', 'Дерево проблем: ' + problem.title));
+    if (metric) content.append(el('p', 'Иерархия метрик: ' + metric.title));
+    if (problem?.shared || metric?.shared) {
+      content.append(el('p', 'Среди источников есть дерево, ранее связанное с несколькими задачами. Изменения этого дерева видны во всех этих задачах.'));
     }
-    const select = picker('Дерево проблем', 'Не использовать', trees);
-    const cases = el('fieldset', '');
-    cases.hidden = true;
-    content.append(cases);
-    const metric = picker('Иерархия метрик', 'Не использовать', metrics.trees);
-    const metricInfo = el('p', '');
-    content.append(metricInfo);
-    function restoreChoice(select, options, id) {
-      if (!id) return;
-      if (!options.some(option => option.id === id)) {
-        select.append(new Option('Источник недоступен — выберите замену', id));
-        select.lastElementChild.disabled = true;
+    const options = [];
+    if (problem?.cases.length) {
+      const cases = el('fieldset', '');
+      cases.append(el('legend', 'Кейсы для черновика'));
+      const chosen = links.tree_id === problem.id && Array.isArray(links.cases);
+      for (const [index, title] of problem.cases.entries()) {
+        const choice = check(title, !chosen || (links.case_version === problem.version && links.cases.includes(index + 1)));
+        cases.append(choice.label); options.push(choice.input);
       }
-      select.value = id;
+      if (chosen && links.case_version !== problem.version) cases.append(el('p', 'Версия кейсов изменилась. Выберите нужные кейсы заново.'));
+      content.append(cases);
     }
-    restoreChoice(metric, metrics.trees, links.metric_tree_id);
-    let loaded, sequence = 0;
-    const generate = action(bindOnly ? 'Применить связи' : 'Подготовить предложение', async () => {
-      const initial = read(), chosen = metrics.trees.find(t => t.id === metric.value);
-      const selectedLinks = {};
-      if (select.value) selectedLinks.tree_id = select.value;
-      if (chosen) selectedLinks.metric_tree_id = chosen.id;
-      if (loaded) {
-        selectedLinks.case_version = loaded.version;
-        selectedLinks.cases = [...cases.querySelectorAll(':checked')].map(c => Number(c.value));
-      }
-      if (bindOnly) {
-        links = selectedLinks; linksChanged(links); changed(); dialog.close();
-        return;
-      }
-      select.disabled = cases.disabled = metric.disabled = true;
+    status(problem || metric ? '' : 'Можно начать с описания задачи или текущего текста документа.');
+    action('Подготовить предложение', async () => {
+      const initial = read();
+      const selected = options.flatMap((input, i) => input.checked ? [i + 1] : []);
+      const selectedLinks = {...links};
+      if (problem) Object.assign(selectedLinks, {tree_id:problem.id, cases:selected, case_version:problem.version});
+      if (metric) selectedLinks.metric_tree_id = metric.id;
       status('Модель готовит черновик…');
-      try {
-        const data = await api('compose', {...initial, request:brief.value, tree_id:select.value, revision:loaded?.source.revision,
-          version:loaded?.version, cases:selectedLinks.cases || [],
-          metric_tree_id:chosen?.id, metric_revision:chosen?.revision});
-        if (token === active) preview(data.proposals, initial, selectedLinks);
-      } finally { select.disabled = cases.disabled = metric.disabled = false; }
+      const data = await api('compose', {...initial, request:brief.value, tree_id:problem?.id,
+        revision:problem?.revision, version:problem?.version, cases:selected,
+        metric_tree_id:metric?.id, metric_revision:metric?.revision});
+      if (token === active) preview(data.proposals, initial, selectedLinks);
     });
-    function ready() {
-      generate.disabled = Boolean((metric.value && !metrics.trees.some(t => t.id === metric.value)) ||
-        (select.value && !loaded));
-    }
-    metric.onchange = () => {
-      const chosen = metrics.trees.find(t => t.id === metric.value);
-      metricInfo.replaceChildren();
-      if (chosen) metricInfo.append(link('Открыть дерево · версия ' + chosen.revision, url('/metric-tree.html', chosen.id)));
-      else if (!metrics.trees.length) metricInfo.append(link('Создать иерархию метрик', '/metric-tree.html'));
-      ready();
-    };
-    metric.onchange();
-    if (!trees.length) content.append(link('Открыть пространство проблем', '/problem-space.html'));
-    status('');
-    select.onchange = async () => {
-      const step = ++sequence;
-      loaded = null; ready();
-      cases.hidden = true; cases.replaceChildren(); status('');
-      if (!select.value) return;
-      status('Загружаем кейсы…');
-      try {
-        const result = await api('get', {id:select.value}, 'solution-spaces');
-        if (step !== sequence || token !== active) return;
-        loaded = result;
-        const options = result.saved?.options || [];
-        cases.append(el('legend','Кейсы для черновика'), el('p', options.length ? 'Отметьте кейсы, которые нужно учесть.' : 'У этого дерева пока нет сохранённых кейсов.'));
-        const sameTree = links.tree_id === select.value;
-        const previousCases = sameTree && links.case_version === result.version ? (links.cases || []) : [];
-        if (sameTree && links.cases?.length && links.case_version !== result.version) {
-          cases.append(el('p', 'Версия кейсов изменилась. Выберите нужные кейсы заново.'));
-        }
-        options.forEach((item, i) => {
-          const choice = check(item.title, sameTree && !Array.isArray(links.cases) || previousCases.includes(i + 1));
-          choice.input.value = i + 1;
-          cases.append(choice.label);
-        });
-        cases.hidden = false; ready();
-        status('Дерево · версия ' + result.source.revision + (result.saved ? '. Кейсы · версия ' + result.version + ', по дереву версии ' + result.saved.source.revision : ''));
-      } catch (error) { if (step === sequence && token === active) status(error.message); }
-    };
-    restoreChoice(select, trees, links.tree_id);
-    if (select.value) await select.onchange();
-    ready();
   }
   async function review() {
     const active = open('Ревью документа'), draft = read();
@@ -272,7 +221,6 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     const pending = fn(), active = token;
     pending.catch(error => { if (active === token) status(error.message); });
   }
-  $('link-task').onclick = () => launch(() => compose(true));
   $('compose-doc').onclick = () => launch(compose);
   $('review-doc').onclick = () => launch(review);
   $('assist-close').onclick = () => dialog.close();
@@ -283,6 +231,7 @@ window.setupDesignAssistant = function ({fields, api, read, changed, getId, link
     load(value, taskLinks) {
       links = taskLinks || {};
       refs = value || {};
+      unavailable = new Set();
       $('source-update').textContent = '';
       showRefs(); checkUpdates();
     }
