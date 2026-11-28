@@ -38,6 +38,24 @@ class SolutionSpaces(unittest.TestCase):
         self.assertEqual(state['source']['answers'][0]['answer'], 'Вечером')
         self.assertEqual(state['saved']['source']['answers'][0]['answer'], 'Утром')
 
+    def test_manual_case_requires_only_a_title_until_research(self):
+        case = dict.fromkeys(solutions.FIELDS, '') | {'title': 'Заместитель', 'evidence': []}
+        with patch('solution_spaces.standalone_answer') as model, patch('solution_spaces.search') as search:
+            self.call('save', options=[case], version=0, source_revision=1)
+            self.assertEqual(self.call('get')['saved']['options'], [case])
+            with self.assertRaises(ContractError):
+                self.call('save', options=[{**case, 'title': '  '}], version=1, source_revision=1)
+            with self.assertRaisesRegex(ContractError, 'оба поисковых запроса'):
+                self.call('research', case={**case, 'query': 'workflow'}, source_revision=1)
+            search.assert_not_called()
+            model.assert_not_called()
+            search.return_value = ([], [])
+            self.call('research', case={**case, 'query': 'workflow', 'business_query': 'approvals'}, source_revision=1)
+            search.assert_called_once_with('approvals', 'workflow')
+            model.return_value = json.dumps([case])
+            with self.assertRaisesRegex(ContractError, 'неполные варианты'):
+                self.call('generate')
+
     def test_outcome_needs_evidence_and_urls_come_from_search(self):
         record = {'title': 'Тест', 'id': 1, 'provider': 'arXiv', 'url': 'https://arxiv.org/abs/example', 'summary': 'Внедрение отложили.'}
         hit = {'id': 1, 'business': 'Похожая цель', 'technical': 'Данные различаются', 'reuse': 'Проверить', 'quote': 'Выручка выросла', 'outcome': 'Успех'}
