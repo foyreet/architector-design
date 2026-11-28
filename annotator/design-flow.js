@@ -8,11 +8,7 @@ window.designFlow = (() => {
     doc: params.get('doc'), draft: params.has('draft')};
   const paths = {problems:'/problem-space.html', solutions:'/solution-space.html',
     metrics:'/metric-tree.html', document:'/design-docs.html'};
-  if (location.pathname === paths.solutions && params.has('id')) {
-    if (state.tree && state.tree !== params.get('id')) {
-      state.doc = state.metric = null;
-      state.draft = false;
-    }
+  if (!state.doc && location.pathname === paths.solutions && params.has('id')) {
     state.tree = params.get('id');
   }
   function url(step, task = state) {
@@ -28,14 +24,18 @@ window.designFlow = (() => {
     if (task.doc && !task.draft && !id && step !== 'document') next.searchParams.set('attach', '1');
     return next;
   }
-  async function taskTitle(task = state) {
-    if (!task.doc) return '';
-    const response = await fetch('/api/design-documents/task-title', {method:'POST',
+  async function resolveTask(task = state) {
+    if (!task.doc && (task === state || !(task.tree || task.metric))) return null;
+    const response = await fetch('/api/design-documents/task-navigation', {method:'POST',
       headers:{'Content-Type':'application/json', 'X-Architect-Request':'1'},
-      body:JSON.stringify({id:task.doc, tree_id:task.tree, metric_tree_id:task.metric})});
+      body:JSON.stringify({task_id:task.doc, task_tree_id:task.tree, task_metric_tree_id:task.metric})});
     const result = await response.json();
-    if (!response.ok) throw Error(result.error || 'Не удалось загрузить название задачи.');
-    return result.title || '';
+    if (!response.ok) throw Error(result.error || 'Не удалось загрузить задачу.');
+    if (task === state) {
+      Object.assign(state, {tree:result.links.tree_id, metric:result.links.metric_tree_id, draft:result.draft});
+      refresh();
+    }
+    return result;
   }
   function refresh() {
     for (const a of nav.querySelectorAll('a[data-step]')) a.href = url(a.dataset.step);
@@ -97,5 +97,5 @@ window.designFlow = (() => {
   function aiScope() {
     return {task_id:state.doc, task_tree_id:state.tree, task_metric_tree_id:state.metric};
   }
-  return {url, aiScope, taskTitle, treeOpened, documentOpened, lastVisit, remember, historyPrefix};
+  return {url, aiScope, resolveTask, treeOpened, documentOpened, lastVisit, remember, historyPrefix};
 })();

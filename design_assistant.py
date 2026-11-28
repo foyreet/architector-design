@@ -88,7 +88,7 @@ def ids(value, allowed):
 def metric_context(hub, user, body):
     tree = metric_trees.request(hub, user, {'id': body['metric_tree_id']}, 'get')
     if type(body.get('metric_revision')) is not int or body['metric_revision'] != tree['revision']:
-        raise ContractError('Иерархия метрик изменилась. Откройте выбор источников заново.', 409)
+        raise ContractError('Иерархия метрик изменилась. Откройте сборку черновика заново.', 409)
     nodes = []
     pending = [(0, node) for node in reversed(tree['metrics'])]
     while pending:
@@ -127,16 +127,27 @@ def request(hub, user, body, action):
             raise ContractError('Сначала заполните хотя бы один раздел.')
         metric_sources = {key: ref['metric_tree'] for key, ref in sources(body.get('sources', {})).items()
                           if 'metric_tree' in ref}
+        if body.get('task_id'):
+            with hub.db() as db:
+                _, links, _ = task_context.task_record(db, user['id'], body)
+                metric = db.execute('SELECT id FROM metric_trees WHERE id=? AND owner=?',
+                                    (links.get('metric_tree_id'), user['id'])).fetchone()
+                metric_sources = {key: ref for key, ref in metric_sources.items() if metric and ref['id'] == metric['id']}
         context = {**document, 'metric_sources': metric_sources}
         contract = REVIEW_CONTRACT
     else:
+        if body.get('task_id'):
+            with hub.db() as db:
+                _, links, _ = task_context.task_record(db, user['id'], body)
+                if any(body.get(key) and body[key] != links.get(key) for key in ('tree_id', 'metric_tree_id')):
+                    raise ContractError('Материалы задачи изменились. Откройте сборку черновика заново.', 409)
         tree = metric_context(hub, user, body) if body.get('metric_tree_id') else None
         source, saved, version = None, None, 0
         if body.get('tree_id'):
             state = solution_request(hub, user, {'id': body['tree_id']}, 'get')
             source, saved, version = state['source'], state['saved'], state['version']
             if body.get('revision') != source['revision'] or body.get('version') != version:
-                raise ContractError('Источники изменились. Откройте выбор дерева заново.', 409)
+                raise ContractError('Источники изменились. Откройте сборку черновика заново.', 409)
         elif not tree and not (task_context.request_text(body) or any(s.strip() for s in sections.values()) or body.get('task_id')):
             raise ContractError('Опишите задачу или выберите материалы для черновика.')
         options = saved['options'] if saved else []

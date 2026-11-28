@@ -1,4 +1,6 @@
 """Private ML design documents and immutable community snapshots."""
+from collections import Counter
+from copy import deepcopy
 import json
 import time
 import uuid
@@ -168,6 +170,13 @@ def document_overview(db, owner):
             used_problems.add(draft['tree_id'])
             used_metrics.add(draft['metric_tree_id'])
 
+    tasks = documents + unlinked
+    memberships = Counter((kind, task[kind]['id']) for task in tasks
+                          for kind in ('problem', 'metric') if task[kind])
+    for task in tasks:
+        task['shared'] = any(memberships[kind, task[kind]['id']] > 1
+                             for kind in ('problem', 'metric') if task[kind])
+
     for row in db.execute('SELECT kind,tree_id FROM dismissed_tree_tasks WHERE owner=?', (owner,)):
         (used_problems if row['kind'] == 'problem' else used_metrics).add(row['tree_id'])
 
@@ -282,8 +291,80 @@ def delete_draft_task(db, owner, body):
     return {'deleted': task_id, 'removed_trees': removed}
 
 
+def check_new_links(db, owner, doc_id, previous, proposed):
+    from task_context import used_by_other_task
+    for key in ('tree_id', 'metric_tree_id'):
+        tree_id = proposed.get(key)
+        if tree_id and tree_id != previous.get(key) and used_by_other_task(db, owner, doc_id, key, tree_id):
+            raise ContractError('Дерево уже используется другой задачей. Откройте документ из списка задач.', 409)
+
+
+def copy_stages(db, owner, links, refs):
+    """Copy the linked material and retarget matching section evidence in this transaction."""
+    copies = {}
+    for key, table in [('tree_id', 'problem_spaces'), ('metric_tree_id', 'metric_trees')]:
+        original = links.get(key)
+        if not original:
+            continue
+        new_id = str(uuid.uuid4())
+        inserted = db.execute(f'''INSERT INTO {table}(id,owner,title,problem,tree,revision,updated)
+                                   SELECT ?,owner,title,problem,tree,revision,updated FROM {table}
+                                   WHERE owner=? AND id=?''', (new_id, owner, original))
+        if not inserted.rowcount:
+            continue
+        copies[key] = new_id
+        if key == 'tree_id':
+            db.execute('''INSERT INTO solution_spaces(tree_id,content,version)
+                          SELECT ?,content,version FROM solution_spaces WHERE tree_id=?''', (new_id, original))
+            copies.update({k: links[k] for k in ('cases', 'case_version') if k in links})
+    for ref in refs.values():
+        if 'tree_id' in copies and ref.get('tree_id') == links['tree_id']:
+            ref['tree_id'] = copies['tree_id']
+        metric = ref.get('metric_tree')
+        if metric and 'metric_tree_id' in copies and metric['id'] == links['metric_tree_id']:
+            metric['id'] = copies['metric_tree_id']
+    return copies
+
+
+def separate_shared(db, owner, task_id):
+    from task_context import used_by_other_task
+    db.execute('BEGIN IMMEDIATE')
+    doc = db.execute('SELECT task_links,sources FROM design_documents WHERE owner=? AND id=?',
+                     (owner, task_id)).fetchone()
+    if doc:
+        links, refs = json.loads(doc['task_links']), json.loads(doc['sources'])
+    else:
+        draft = db.execute('SELECT tree_id,metric_tree_id FROM design_task_drafts WHERE owner=? AND id=?',
+                           (owner, task_id)).fetchone()
+        if not draft:
+            raise ContractError('Задача не найдена.', 404)
+        links, refs = dict(draft), {}
+    shared = {k: links[k] for k in ('tree_id', 'metric_tree_id')
+              if links.get(k) and used_by_other_task(db, owner, task_id, k, links[k])}
+    copies = copy_stages(db, owner, shared, refs)
+    if copies:
+        links.update(copies)
+        if doc:
+            db.execute('''UPDATE design_documents SET task_links=?,sources=?,revision=revision+1,updated=?
+                          WHERE owner=? AND id=?''',
+                       (json.dumps(links), json.dumps(refs, ensure_ascii=False), time.time(), owner, task_id))
+        else:
+            db.execute('UPDATE design_task_drafts SET tree_id=?,metric_tree_id=? WHERE owner=? AND id=?',
+                       (links.get('tree_id'), links.get('metric_tree_id'), owner, task_id))
+    return {'task_links': links}
+
+
 def request(hub, user, body, action):
     if user is None: raise ContractError('Войдите в аккаунт Архитектора, чтобы работать с документами.', 401)
+    if action == 'separate-shared':
+        with hub.db() as db:
+            return separate_shared(db, user['id'], identity(body.get('id')))
+    if action == 'task-navigation':
+        from task_context import navigation
+        return navigation(hub, user, body)
+    if action == 'task-sources':
+        from task_context import composition_sources
+        return composition_sources(hub, user, body)
     if action in ('create-task', 'task-title'):
         owner, task_id = user['id'], identity(body.get('id'))
         with hub.db() as db:
@@ -326,7 +407,7 @@ def request(hub, user, body, action):
                 return document_overview(db, user['id'])
             rows = db.execute('SELECT id,title,updated,revision FROM design_documents WHERE owner=? ORDER BY updated DESC', (user['id'],))
             return {'documents': [dict(row) for row in rows]}
-    if action in ('create', 'import'):
+    if action in ('create', 'import', 'duplicate'):
         doc_id = identity(body.get('id'))
         source = None
         if action == 'import':
@@ -356,13 +437,27 @@ def request(hub, user, body, action):
             db.execute('INSERT INTO design_documents(id,owner,title,sections,revision,updated,source_release,problem_tree) VALUES(?,?,?,?,?,?,?,?)',
                        (doc_id, user['id'], name, json.dumps(sections, ensure_ascii=False), 1, time.time(), source, json.dumps(tree, ensure_ascii=False)))
             refs = sources((package if action == 'import' else body).get('sources', {}))
+            if action in ('duplicate', 'import'):
+                refs = deepcopy(refs)
             links = task_links((package if action == 'import' else body).get('task_links', {}))
-            if draft:
+            if action == 'duplicate':
+                original = owned(db, user, body.get('original_id'))
+                saved_links = json.loads(original['task_links'])
+                if links.get('tree_id') == saved_links.get('tree_id') and 'cases' in links:
+                    saved_links.update(cases=links['cases'], case_version=links['case_version'])
+                links = copy_stages(db, user['id'], saved_links, refs)
+            elif action == 'import':
+                links = copy_stages(db, user['id'], links, refs)
+            elif draft:
+                for key in ('tree_id', 'metric_tree_id'):
+                    if links.get(key) and links[key] != draft[key]:
+                        raise ContractError('Связи задачи изменились. Откройте документ из списка задач.', 409)
                 initial = task_links(body.get('initial_task_links', {}))
                 for key in ('tree_id', 'metric_tree_id'):
                     if draft[key] and key not in initial:
                         links.setdefault(key, draft[key])
                 db.execute('DELETE FROM design_task_drafts WHERE owner=? AND id=?', (user['id'], doc_id))
+            check_new_links(db, user['id'], doc_id, dict(draft) if draft else {}, links)
             db.execute('UPDATE design_documents SET sources=?, task_links=? WHERE id=?',
                        (json.dumps(refs, ensure_ascii=False), json.dumps(links), doc_id))
             if tree:
@@ -396,6 +491,7 @@ def request(hub, user, body, action):
             if revision != row['revision']:
                 raise ContractError('Документ изменён в другой вкладке. Сохраните свой вариант отдельно или загрузите сохранённую версию.', 409)
             if not same:
+                check_new_links(db, user['id'], row['id'], previous_links, links)
                 db.execute('UPDATE design_documents SET title=?,sections=?,sources=?,task_links=?,revision=revision+1,updated=? WHERE id=?',
                            (name, json.dumps(sections, ensure_ascii=False), json.dumps(refs, ensure_ascii=False), json.dumps(links), time.time(), row['id']))
             return {'document': public(owned(db, user, row['id']))}

@@ -17,7 +17,7 @@
   async function api(action, body) {
     const response = await fetch(endpoint + action, {
       method: 'POST', headers: {'Content-Type': 'application/json', 'X-Architect-Request': '1'},
-      body: JSON.stringify(body)
+      body: JSON.stringify({...window.designFlow.aiScope(), ...body})
     });
     const data = await response.json();
     if (!response.ok) throw Object.assign(Error(data.error || 'Ошибка запроса.'), {status: response.status});
@@ -100,7 +100,7 @@
     const current = value();
     const sent = JSON.stringify(current);
     const attach = {};
-    if (url.searchParams.has('attach')) attach.doc = url.searchParams.get('doc');
+    if (!conflict && url.searchParams.has('attach')) attach.doc = url.searchParams.get('doc');
     if (url.searchParams.has('draft') && !conflict) {
       attach.draft_task = url.searchParams.get('doc');
       attach.companion = url.searchParams.get(metrics ? 'tree' : 'metric');
@@ -109,7 +109,7 @@
       const result = attach.doc && !dirty && revision
         ? await api('attach', {id:dest, ...attach})
         : await api('save', {...current, title:revision && url.searchParams.has('doc') ? resourceTitle : current.title,
-          id:dest, revision:conflict ? 0 : revision, ...attach});
+          id:dest, revision:conflict ? 0 : revision, ...attach, ...(conflict ? {task_id:null} : {})});
       url.searchParams.delete('attach');
       if (!revision || !url.searchParams.has('doc')) resourceTitle = current.title;
       openTreeAfterSave(dest, result.revision);
@@ -162,6 +162,15 @@
         const data = JSON.parse(await input.files[0].text());
         if (data.version !== 1 || !(metrics ? [space] : [space,'architect.design-document']).includes(data.format)) throw Error('Выберите JSON дерева.');
         const record = {...fresh(), title: data.title, [goalKey]: data[goalKey] ?? data.sections?.problem ?? '', [nodesKey]: data[nodesKey]};
+        if (url.searchParams.has('doc')) {
+          const imported = await api('validate-import', {...record, title:$('title').value});
+          $('formulation').value = imported[goalKey];
+          tree.load(imported[nodesKey]);
+          tree.updateOrigin();
+          changed();
+          status('Содержимое заменено. Нажмите «Сохранить», чтобы применить изменения.');
+          return;
+        }
         const result = await api('save', record);
         openTree({...record, revision: result.revision});
       } catch (error) { status(error.message); }
@@ -178,10 +187,28 @@
   });
   document.body.inert = true;
   const oldNew = url.searchParams.get('new');
-  const initial = url.searchParams.get('id') || (oldNew ? oldNew === '1' ? null : oldNew : localStorage.getItem(last));
   async function start() {
-    taskTitle = await window.designFlow.taskTitle();
-    await restore(initial);
+    const task = await window.designFlow.resolveTask();
+    if (task) {
+      taskTitle = task.title;
+      const key = metrics ? 'metric_tree_id' : 'tree_id';
+      const pendingKey = space + '.pending.' + url.searchParams.get('doc');
+      let treeId = task.links[key];
+      if (treeId) localStorage.removeItem(pendingKey);
+      else {
+        treeId = localStorage.getItem(pendingKey) || crypto.randomUUID();
+        localStorage.setItem(pendingKey, treeId);
+      }
+      url.searchParams.delete('attach');
+      url.searchParams.delete('draft');
+      if (task.draft) url.searchParams.set('draft', '1');
+      else if (!task.links[key]) url.searchParams.set('attach', '1');
+      $('import').textContent = 'Заменить содержимое из JSON';
+      await restore(treeId);
+    } else {
+      const initial = url.searchParams.get('id') || (oldNew ? oldNew === '1' ? null : oldNew : localStorage.getItem(last));
+      await restore(initial);
+    }
   }
   start().catch(error => { status(error.message); }).finally(() => { document.body.inert = false; });
 })();

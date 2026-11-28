@@ -49,7 +49,11 @@ class Documents(unittest.TestCase):
             return self.call('list', {'include_progress': True})
         self.assertEqual([row['problem']['id'] for row in overview()['unlinked']], [tree_id])
         self.save(task_links={'tree_id': tree_id, 'metric_tree_id': str(uuid.uuid4())})
-        second = self.call('create', {'id': str(uuid.uuid4()), 'task_links': {'tree_id': tree_id}})
+        second = self.call('create', {'id': str(uuid.uuid4())})
+        # Simulate a shared link written by an earlier release.
+        with self.hub.db() as db:
+            db.execute('UPDATE design_documents SET task_links=? WHERE id=?',
+                       (json.dumps({'tree_id':tree_id}), second['document']['id']))
         result = overview()
         self.assertFalse(result['unlinked'])
         self.assertEqual(len(result['documents']), 2)
@@ -101,7 +105,9 @@ class Documents(unittest.TestCase):
         self.assertEqual(stale.exception.status, 409)
         with self.hub.db() as db:
             self.assertEqual(db.execute('SELECT version FROM solution_spaces WHERE tree_id=?', (tree,)).fetchone()[0], 1)
-        self.save(task_links={'metric_tree_id': goal})
+        with self.hub.db() as db:
+            db.execute('UPDATE design_documents SET task_links=? WHERE id=?',
+                       (json.dumps({'metric_tree_id':goal}), self.doc['id']))
         self.assertEqual(self.call('delete-draft', payload)['removed_trees'], {'problem': tree})
         self.assertEqual(metric(self.hub, self.a, {'id': goal}, 'get')['revision'], 1)
         with self.hub.db() as db:
@@ -209,7 +215,8 @@ class Documents(unittest.TestCase):
             self.call('save', {**original, 'task_links':{}})
         package = self.call('export', saved)['package']
         imported = self.call('import', {'id':str(uuid.uuid4()), 'package':package})['document']
-        self.assertEqual(imported['task_links'], links)
+        # The exported links point to missing materials on this computer.
+        self.assertEqual(imported['task_links'], {})
         with self.assertRaises(ContractError):
             self.call('save', {**saved, 'task_links':{'cases':[1], 'case_version':2}})
         cleared = self.call('save', {**saved, 'task_links':{}})['document']
