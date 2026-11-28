@@ -117,9 +117,8 @@
 .list-heading h1{margin-right:auto}
 #documents{margin-top:24px}
 #documents>.muted{max-width:60ch}
-/* Task search sits between the heading and the list. */
-.task-filter{margin-top:20px;max-width:420px}
-.task-filter input{margin:0;min-height:44px}
+.task-filter{flex:0 1 340px;min-width:0}
+.task-filter input{margin:0;height:44px}
 #task-filter-empty{margin:24px 0 0;overflow-wrap:anywhere}
 
 /* Editor: outline column and a readable text column. */
@@ -151,46 +150,41 @@ main#editor>#doc-outline{grid-column:1;grid-row:2/span 40;align-self:start;posit
 }
 @media(max-width:600px){.doc-section{scroll-margin-top:156px}}
 
-@media(min-width:761px) {
-  #list {max-width:1120px; padding-inline:16px}
-}
-.task-row {
-  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:0 16px;
-  align-items:start; padding:10px 16px; background:white; border-bottom:1px solid #d7dfec;
-}
-.task-row h3 {margin:0; min-width:0}
-.task-row .document-row {
-  display:inline-flex; align-items:center; width:auto; min-height:44px; padding:0;
-  border:0; font-size:16px; color:inherit; overflow-wrap:anywhere;
-}
-.task-row .document-row:hover {color:#2054c7; text-decoration:underline}
-.task-row-actions {grid-column:2; grid-row:1; display:flex; flex-wrap:wrap; gap:8px}
-.task-steps {
-  grid-column:1/-1; display:flex; flex-wrap:wrap; align-items:center; gap:0 12px;
-  list-style:none; padding:0; margin:0; font-size:13px;
-}
-.task-steps li {display:flex; gap:12px; align-items:center}
-.task-steps li+li::before {content:''; width:10px; height:1px; background:#c7d1e1}
-.task-step {display:inline-flex; align-items:center; gap:6px; min-height:32px; color:#35435a}
-a.task-step:hover {text-decoration:underline; color:#2054c7}
-.task-step .step-number {width:20px; height:20px; font-size:11px}
-.step-number.started {background:#eaf0ff; border-color:#c1cef5; color:#2349ad}
-.step-status {color:#53647c}
-@media(max-width:900px) {
-  .task-steps {display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0 8px}
-  .task-steps li+li::before {display:none}
-  .task-step {display:grid; grid-template-columns:auto 1fr; column-gap:6px; row-gap:0; min-height:44px; align-content:center}
-  .task-step .step-number {grid-row:1 / span 2}
-  .step-status {grid-column:2}
-}
+#list {max-width:1280px}
+.task-table {width:100%; border-collapse:collapse; table-layout:fixed; text-align:left; background:white}
+.task-table th, .task-table td {padding:9px 12px; border-bottom:1px solid #d7dfec}
+.task-table thead th {background:#f0f3f8; color:#52627a; font-size:13px; font-weight:550}
+.task-table thead th:first-child {width:33%}
+.task-table thead th:last-child {width:64px; font-size:0}
+.task-row .document-row {display:flex; align-items:center; min-height:44px; padding:0; border:0; font-size:15px; color:inherit}
+.task-step {display:flex; align-items:center; gap:8px; min-height:44px; color:#344966; font-size:14px; overflow-wrap:anywhere}
+.task-step:hover, .task-row .document-row:hover {color:#2054c7; text-decoration:underline}
+.task-stage-label {display:none}
+.task-track {display:flex; align-items:stretch; flex:0 1 76px; height:6px; background:#e1e7f0; border-radius:3px; overflow:hidden}
+.task-track span {flex:1; background:#e1e7f0}
+.task-track span + span {border-left:2px solid white}
+.task-track .filled {background:#285bef}
+.task-track span:only-child {flex:none}
+.task-fraction {font-variant-numeric:tabular-nums; white-space:nowrap; color:#53647c}
+.task-menu {position:relative}
+.task-menu summary {display:grid; place-items:center; min-height:44px; min-width:44px; border-radius:8px; cursor:pointer; font-size:20px}
+.task-menu summary::-webkit-details-marker {display:none}
+.task-menu summary:hover, .task-menu[open] summary {background:#edf2ff}
+.task-row-actions {position:absolute; top:100%; right:0; z-index:3; width:max-content; max-width:80vw; padding:4px; background:white; border:1px solid #d7dfec; border-radius:8px; box-shadow:0 4px 14px #283a5b20}
+.task-row-actions button {display:block; width:100%; border:0; text-align:left}
 @media(max-width:760px) {
-  .task-row {padding:8px 12px}
-  .task-row h3 {grid-column:1/-1}
-  .task-row-actions {grid-column:1/-1; grid-row:3; margin:6px 0 0}
-  .task-steps {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .list-heading {gap:10px}
+  .task-filter {order:1; flex:1 0 100%}
+  .task-table, .task-table tbody {display:block}
+  .task-table thead {display:none}
+  .task-row {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); position:relative; padding:10px 14px; gap:4px 12px; border-bottom:1px solid #d7dfec}
+  .task-table .task-row > * {padding:0; border:0}
+  .task-row th {grid-column:1/-1; margin-right:48px}
+  .task-row .task-action-cell {position:absolute; top:10px; right:10px}
+  .task-step {display:flex; flex-wrap:wrap; align-content:center; gap:0 7px}
+  .task-stage-label {display:block; width:100%; color:#53647c; font-size:12px}
   header:has(#design-flow[hidden]) #account {display:block; font-size:13px}
 }
-@media(pointer:coarse){a.task-step {min-height:44px}}
 
 #method-dialog {width:min(720px,calc(100vw - 24px)); max-height:90dvh}
 #method-dialog[open] {display:flex; flex-direction:column}

@@ -330,12 +330,28 @@
     return count + ' ' + ({one, few}[pluralRules.select(count)] || many);
   }
 
+  const stageLabels = {problems:'Проблемы', solutions:'Решения', metrics:'Метрики', document:'Документ'};
+
+  function taskTable(rows) {
+    const table = node('table', '', 'task-table');
+    table.setAttribute('aria-label', 'Задачи');
+    const header = table.createTHead().insertRow();
+    for (const label of ['Задача', ...Object.values(stageLabels), 'Действия']) {
+      const cell = node('th', label);
+      cell.scope = 'col';
+      header.append(cell);
+    }
+    table.createTBody().append(...rows);
+    return table;
+  }
+
   function taskRow(row) {
     const {problem, metric} = row;
     const context = {tree:problem?.id, metric:metric?.id, doc:row.id || row.draft_id, draft:!row.id};
     const stepUrl = step => window.designFlow.url(step, context);
-    const item = node('article', '', 'task-row');
-    const heading = node('h3', '');
+    const item = node('tr', '', 'task-row');
+    const heading = node('th', '');
+    heading.scope = 'row';
     const title = node('a', row.title, 'document-row');
     function resume() {
       const visit = window.designFlow.lastVisit(context);
@@ -346,11 +362,22 @@
     item.refreshVisit = resume;
     heading.append(title);
     item.append(heading);
+    const actionCell = node('td', '', 'task-action-cell');
+    const menu = node('details', '', 'task-menu');
+    menu.name = 'task-actions';
+    const toggle = node('summary', '⋯');
+    toggle.dataset.taskId = context.doc;
+    toggle.setAttribute('aria-label', 'Действия с задачей «' + row.title + '»');
     const actions = node('div', '', 'task-row-actions');
+    menu.append(toggle, actions);
+    actionCell.append(menu);
     const rename = node('button', 'Переименовать');
-    rename.dataset.taskId = context.doc;
     rename.setAttribute('aria-label', 'Переименовать задачу «' + row.title + '»');
-    rename.onclick = () => showNameDialog(row);
+    rename.onclick = () => {
+      menu.open = false;
+      toggle.focus();
+      showNameDialog(row);
+    };
     const remove = node('button', 'Удалить', 'delete-document');
     const label = (row.id ? 'Удалить документ «' : 'Удалить задачу «') + row.title + '»';
     remove.setAttribute('aria-label', label);
@@ -394,26 +421,39 @@
     }
     actions.append(rename, remove);
 
-    const steps = node('ol', '', 'task-steps');
-    steps.setAttribute('aria-label', 'Этапы задачи «' + row.title + '»');
-    function addStep(key, label, status, active) {
-      const li = node('li', '');
+    function addStep(key, status, progress) {
+      const cell = node('td');
       const link = node('a', '', 'task-step');
       link.href = stepUrl(key);
-      const number = node('span', steps.children.length + 1, 'step-number');
-      number.setAttribute('aria-hidden', 'true');
-      if (active) number.classList.add('started');
-      link.append(number, node('span', label), node('span', status, 'step-status'));
-      li.append(link);
-      steps.append(li);
+      link.setAttribute('aria-label', stageLabels[key] + ' ' + status);
+      link.append(node('span', stageLabels[key], 'task-stage-label'));
+      if (progress) {
+        const {value, total} = progress;
+        const track = node('span', '', 'task-track');
+        track.setAttribute('aria-hidden', 'true');
+        if (key === 'document') {
+          for (let i = 0; i < total; i++) track.append(node('span', '', i < value ? 'filled' : ''));
+        } else {
+          const fill = node('span', '', 'filled');
+          fill.style.width = (100 * value / total) + '%';
+          track.append(fill);
+        }
+        link.append(track, node('span', value + '/' + total, 'task-fraction'));
+      } else {
+        link.append(node('span', status));
+      }
+      cell.append(link);
+      item.append(cell);
     }
-    addStep('problems', 'Проблемы', problem?.questions ? problem.answered + ' из ' + quantity(problem.questions, 'ответа', 'ответов', 'ответов') :
-      row.missing_problem ? 'дерево недоступно' : 'нет вопросов', !!problem);
-    addStep('solutions', 'Решения', problem?.cases ? quantity(problem.cases, 'кейс', 'кейса', 'кейсов') : 'нет кейсов', !!problem?.cases);
-    addStep('metrics', 'Метрики', metric ? quantity(metric.count, 'показатель', 'показателя', 'показателей') :
-      row.missing_metric ? 'дерево недоступно' : 'не выбраны', !!metric);
-    addStep('document', 'Документ', row.id ? row.filled + ' из ' + quantity(fields.length, 'раздела', 'разделов', 'разделов') : 'не создан', !!row.filled);
-    item.append(steps, actions);
+
+    addStep('problems', problem?.questions ? problem.answered + ' из ' + quantity(problem.questions, 'ответа', 'ответов', 'ответов') :
+      row.missing_problem ? 'дерево недоступно' : 'нет вопросов', problem?.questions && {value:problem.answered, total:problem.questions});
+    addStep('solutions', problem?.cases ? quantity(problem.cases, 'кейс', 'кейса', 'кейсов') : 'нет кейсов');
+    addStep('metrics', metric ? quantity(metric.count, 'показатель', 'показателя', 'показателей') :
+      row.missing_metric ? 'дерево недоступно' : 'не выбраны');
+    addStep('document', row.id ? row.filled + ' из ' + quantity(fields.length, 'раздела', 'разделов', 'разделов') : 'не создан',
+      row.id && {value:row.filled, total:fields.length});
+    item.append(actionCell);
     return item;
   }
 
@@ -427,10 +467,24 @@
     const typed = $('task-filter').value.trim(), query = fold(typed);
     for (const row of rows) row.hidden = !fold(row.querySelector('.document-row').textContent).includes(query);
     const found = shownTitles().length;
+    const table = $('documents').querySelector('.task-table');
+    if (table) table.hidden = !found;
     $('task-filter-empty').hidden = !rows.length || found > 0;
     $('task-filter-empty').textContent = rows.length && !found ? 'По запросу «' + typed + '» задач нет.' : '';
   }
   $('task-filter').addEventListener('input', filterTasks);
+
+  document.addEventListener('click', event => {
+    const menu = $('documents').querySelector('.task-menu[open]');
+    if (menu && !menu.contains(event.target)) menu.open = false;
+  });
+  $('documents').addEventListener('keydown', event => {
+    const menu = event.target.closest('.task-menu[open]');
+    if (menu && event.key === 'Escape') {
+      menu.open = false;
+      menu.querySelector('summary').focus();
+    }
+  });
 
   const byActivity = (first, second) => second.dataset.activity - first.dataset.activity;
   window.addEventListener('storage', event => {
@@ -438,7 +492,7 @@
       const rows = [...$('documents').querySelectorAll('.task-row')];
       for (const row of rows) row.refreshVisit();
       const ordered = [...rows].sort(byActivity);
-      if (ordered.some((row, i) => row !== rows[i])) $('documents').append(...ordered);
+      if (ordered.some((row, i) => row !== rows[i])) rows[0].parentElement.append(...ordered);
     }
   });
   async function list(next='mine') {
@@ -457,7 +511,7 @@
     documents.replaceChildren();
     if (mine) {
       const rows = [...result.documents, ...result.unlinked].map(taskRow);
-      if (rows.length) documents.append(...rows.sort(byActivity));
+      if (rows.length) documents.append(taskTable(rows.sort(byActivity)));
       else documents.append(node('p', 'Задач пока нет.', 'muted'));
     } else {
       for (const row of result.releases) {
@@ -518,7 +572,7 @@
         await list();
         $('create-task-dialog').close();
         // A renamed task can drop out of the current search: return to the search field then.
-        ($('documents').querySelector(`.task-row:not([hidden]) button[data-task-id="${namingId}"]`) || $('task-filter')).focus();
+        ($('documents').querySelector(`.task-row:not([hidden]) summary[data-task-id="${namingId}"]`) || $('task-filter')).focus();
         message('Название сохранено.');
       } else {
         await api('create-task', {id:namingId, title});
