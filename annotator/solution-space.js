@@ -111,11 +111,11 @@
       }
       const refs = document.createElement('details');
       refs.append(element('summary','На каких ответах основан кейс'));
-      for (const i of item.evidence) {
-        const a = plan.source.answers[i - 1];
+      const answers = item.previous_evidence?.answers || item.evidence.map(i => plan.source.answers[i - 1]);
+      for (const a of answers) {
         refs.append(element('strong',a.path.join(' → ')), element('p', a.answer));
       }
-      if (item.evidence.length) card.append(refs);
+      if (answers.length) card.append(refs);
       if (editable) {
         const find = element('button','Найти аналоги в интернете'), note = element('p','');
         const sources = document.createElement('div'); sources.className = 'sources';
@@ -190,7 +190,7 @@
       const result = await api('generate', {request:$('case-request').value});
       if (token !== generation) return;
       proposal = result; cards($('proposals'), proposal, false); $('preview').hidden = false;
-      generateNote(working ? 'Принятые предложения заменят текущие кейсы. Сохранение отдельной кнопкой.' : 'Проверьте кейсы и их связь с запросом и материалами задачи.');
+      generateNote('Отметьте кейсы, которые хотите добавить.');
     } catch (e) { if (token === generation) generateNote(e.message); }
     finally { if (token === generation) { busy = false; $('cancel').hidden = true; controls(); } }
   };
@@ -200,10 +200,21 @@
     if (!proposal || busy) return;
     const selected = Array.from($('proposals').querySelectorAll('input:checked'), input => proposal.options[Number(input.value)]);
     if (!selected.length) return;
-    if (working && !confirm('Заменить текущие кейсы и их подборки источников выбранными кейсами?')) return;
-    newCases.clear();
-    working = {...proposal, options:selected}; source = proposal.source; hidePreview(); cards($('options'), working, true);
-    $('workspace').hidden = false; generateNote('Кейсы приняты. Можно искать аналоги и сохранять изменения.'); mark();
+    // Evidence indexes belong to the answer revision on which the case was based.
+    if (working && working.source.revision !== proposal.source.revision) {
+      for (const item of working.options) {
+        if (item.evidence.length) {
+          item.previous_evidence = {revision:working.source.revision, answers:item.evidence.map(i => working.source.answers[i - 1])};
+          item.evidence = [];
+        }
+      }
+    }
+    working = {...proposal, options:[...(working?.options || []), ...selected]};
+    source = working.source;
+    hidePreview();
+    dirty = true;
+    renderCases();
+    generateNote('Выбранные кейсы добавлены. Нажмите «Сохранить кейсы».');
   };
   $('save').onclick = async () => {
     const missing = [...$('options').querySelectorAll('.case-title textarea')].find(field => !field.value.trim());

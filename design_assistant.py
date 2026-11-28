@@ -158,11 +158,9 @@ def request(hub, user, body, action):
             raise ContractError('Проверьте выбор кейсов.') from None
         cases = []
         for i in selected:
-            option = dict(options[i - 1])
-            option['evidence'] = [saved['source']['answers'][ref - 1] for ref in option['evidence']]
+            option = task_context.case_with_answers(options[i - 1], saved['source'])
             cases.append({'id': i, **option})
-        context = {'document': document, 'tree': source, 'cases': cases, 'metric_tree': tree,
-                   'case_tree_revision': saved['source']['revision'] if cases else None}
+        context = {'document': document, 'tree': source, 'cases': cases, 'metric_tree': tree}
         contract = DRAFT_CONTRACT
     context['task_context'] = task_context.saved_materials(hub, user, body, action)
     context['request'] = task_context.request_text(body)

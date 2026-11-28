@@ -83,6 +83,16 @@ def navigation(hub, user, body):
         return {'id': task_id, 'title': title, 'links': stages, 'draft': not bool(sections)}
 
 
+def case_with_answers(case, source):
+    result = dict(case)
+    previous = result.pop('previous_evidence', None)
+    if previous:
+        result.update(evidence=previous['answers'], evidence_revision=previous['revision'])
+    else:
+        result.update(evidence=[source['answers'][i - 1] for i in case['evidence']], evidence_revision=source['revision'])
+    return result
+
+
 def composition_sources(hub, user, body):
     task_id = identity(body.get('task_id'))
     owner = user['id']
@@ -135,7 +145,7 @@ def saved_materials(hub, user, body, stage):
                     for index, case in enumerate(plan['options'], 1):
                         if selected is not None and (row['version'] != links.get('case_version') or index not in selected):
                             continue
-                        options.append({**case, 'evidence': [plan['source']['answers'][i - 1] for i in case['evidence']]})
+                        options.append(case_with_answers(case, plan['source']))
                     result['solutions'] = {'saved_cases': options, 'request': plan.get('request', '')}
         if metric_id and stage != 'metrics':
             tree = db.execute('SELECT problem,tree FROM metric_trees WHERE id=? AND owner=?',

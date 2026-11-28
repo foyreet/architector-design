@@ -59,7 +59,9 @@ def research(root, case, context, instructions):
     records, failed = search(case['business_query'], case['query'])
     result = []
     if records:
-        prompt = {'case': {k: case[k] for k in FIELDS}, 'context': context, 'sources': records}
+        resolved = task_context.case_with_answers(case, context)
+        prompt = {'case': {k: resolved[k] for k in (*FIELDS, 'evidence', 'evidence_revision')},
+                  'context': context, 'sources': records}
         reply = standalone_answer(root, json.dumps(prompt, ensure_ascii=False), instructions)
         try:
             hits = decode(reply)
@@ -96,11 +98,12 @@ def source(row):
     return {'title': row['title'], 'problem': row['problem'], 'answers': answers, 'revision': row['revision']}
 
 
-def validate(options, context, required):
+def validate(options, context, required, *, allow_previous=False):
     if not isinstance(options, list) or not options:
         raise ValueError()
+    optional = {'sources', 'previous_evidence'} if allow_previous else {'sources'}
     for item in options:
-        if not isinstance(item, dict) or set(item) - {'sources'} != {*FIELDS, 'evidence'}:
+        if not isinstance(item, dict) or set(item) - optional != {*FIELDS, 'evidence'}:
             raise ValueError()
         if any(not isinstance(item[k], str) for k in FIELDS) or any(not item[k].strip() for k in required):
             raise ValueError()
@@ -113,6 +116,15 @@ def validate(options, context, required):
         refs = item['evidence']
         if not isinstance(refs, list) or any(type(i) is not int or not 1 <= i <= len(context['answers']) for i in refs):
             raise ValueError()
+        if 'previous_evidence' in item:
+            previous = item['previous_evidence']
+            if (refs or not isinstance(previous, dict) or type(previous.get('revision')) is not int
+                    or not 0 < previous['revision'] < context['revision'] or not isinstance(previous.get('answers'), list)):
+                raise ValueError()
+            for answer in previous['answers']:
+                if (not isinstance(answer, dict) or not isinstance(answer.get('answer'), str)
+                        or not isinstance(answer.get('path'), list) or not all(isinstance(q, str) for q in answer['path'])):
+                    raise ValueError()
     return options
 
 
@@ -160,7 +172,7 @@ def request(hub, user, body, action):
             else:
                 raise ContractError('Исходные ответы изменились. Обновите страницу и запросите варианты ещё раз.', 409)
             try:
-                options = validate(body.get('options'), context, ('title',))
+                options = validate(body.get('options'), context, ('title',), allow_previous=True)
             except ValueError:
                 raise ContractError('Проверьте заполнение вариантов и ссылки на ответы.') from None
             if not row:
@@ -184,7 +196,7 @@ def request(hub, user, body, action):
             if body.get('source_revision') != context['revision']:
                 raise ContractError('Ответы изменились. Сначала обновите кейсы.', 409)
             try:
-                case = validate([body.get('case')], context, ('title', 'business_query', 'query'))[0]
+                case = validate([body.get('case')], context, ('title', 'business_query', 'query'), allow_previous=True)[0]
             except ValueError:
                 raise ContractError('Для поиска укажите название кейса и оба поисковых запроса. Проверьте ссылки на ответы.') from None
         elif action != 'generate':
